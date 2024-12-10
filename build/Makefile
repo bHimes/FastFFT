@@ -2,7 +2,7 @@
 NVCC=nvcc
 # TODO: test with gcc and clang
 NVCC_FLAGS=-ccbin=g++ -t 8 
-# TODO: static may need to be added later or independently just for benchmarks, while libs to link through python are probably going to need to be dynamic.
+# TODO: static may need to be added later or independently just for benchmarks, while libs to link through python are probably going to need to be dynamic. --split-compile=8
 NVCC_FLAGS+=--cudart=static
 NVCC_FLAGS+=--default-stream per-thread -m64 -O3 --use_fast_math --extra-device-vectorization --extended-lambda --Wext-lambda-captures-this -std=c++17 -Xptxas --warn-on-local-memory-usage,--warn-on-spills, --generate-line-info -Xcompiler=-std=c++17
 # Experimental flag to allow relaxed constexpr host call in device code
@@ -12,6 +12,7 @@ NVCC_FLAGS+=-DCUFFTDX_DISABLE_RUNTIME_ASSERTS
 
 # Don't explicitly instantiate the 3d versions unless requested
 NVCC_FLAGS+=-DFastFFT_3d_instantiation
+NVCC_FLAGS+=-DCUFFTDX_DISABLE_CUTLASS_DEPENDENCY
 
 # Gencode arguments, only supporting Volta or newer
 # SMS ?= 70 75 80 86
@@ -34,6 +35,8 @@ endif
 
 # FIXME: this is set in my own bashrc. Until cufftdx comes out of early release, this is fine.
 CUFFTDX_INCLUDE_DIR := ../include
+COMMONDX_INCLUDE_DIR := ../include/cufftdx/include/
+
 $(info $$CUFFTDX_INCLUDE_DIR is [${CUFFTDX_INCLUDE_DIR}])
 
 # TODO: check on cuda version (building with 11.3.1 r/n)
@@ -116,7 +119,7 @@ $(TEST_BUILD_DIR)/%: $(TEST_BUILD_DIR)/%.o lib/Image.o libFastFFT.a
 
 $(TEST_BUILD_DIR)/%.o: $(TEST_SRC_DIR)/%.cu $(TEST_DEPS)
 	@mkdir -p tests
-	$(NVCC) -dc $(NVCC_FLAGS) $(GENCODE_FLAGS) -I$(CUFFTDX_INCLUDE_DIR) $(DEBUG_FLAGS) -o $@ $<
+	$(NVCC) -dc $(NVCC_FLAGS) $(GENCODE_FLAGS) -I$(CUFFTDX_INCLUDE_DIR) -I$(COMMONDX_INCLUDE_DIR) $(DEBUG_FLAGS) -o $@ $<
 
 # tests/test1: tests/linkedTest.o tests/test.o lib/Image.o libFastFFT.a
 # 	$(NVCC) $(NVCC_FLAGS) $(GENCODE_FLAGS) -o $@ $^ -L$(PWD) -lFastFFT $(EXTERNAL_LIBS)
@@ -132,7 +135,7 @@ $(TEST_BUILD_DIR)/%.o: $(TEST_SRC_DIR)/%.cu $(TEST_DEPS)
 
 lib/Image.o: ../src/fastfft/Image.cu ../src/fastfft/Image.cuh
 	@mkdir -p lib
-	$(NVCC) -dc $(NVCC_FLAGS) $(GENCODE_FLAGS) -I$(CUFFTDX_INCLUDE_DIR) $(DEBUG_FLAGS) -o $@ $< 
+	$(NVCC) -dc $(NVCC_FLAGS) $(GENCODE_FLAGS) -I$(CUFFTDX_INCLUDE_DIR) -I$(COMMONDX_INCLUDE_DIR) $(DEBUG_FLAGS) -o $@ $< 
 	
 
 
@@ -142,7 +145,7 @@ libFastFFT.a: lib/FastFFT.o
 
 lib/FastFFT.o: ../src/fastfft/FastFFT.cu ../include/FastFFT.cuh
 	@mkdir -p lib
-	$(NVCC) -dc $(NVCC_FLAGS) $(GENCODE_FLAGS) -I$(CUFFTDX_INCLUDE_DIR) $(DEBUG_FLAGS) -o $@ $<  
+	$(NVCC) -dc $(NVCC_FLAGS) $(GENCODE_FLAGS) -I$(CUFFTDX_INCLUDE_DIR) -I$(COMMONDX_INCLUDE_DIR) $(DEBUG_FLAGS) -o $@ $<  
  
 
 

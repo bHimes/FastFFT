@@ -1,6 +1,8 @@
 // Utilites for FastFFT.cu that we don't need the host to know about (FastFFT.h)
 #include "FastFFT.h"
 
+// #define USE_FOLDED_R2C_C2R
+
 #ifndef __INCLUDE_FAST_FFT_CUH__
 #define __INCLUDE_FAST_FFT_CUH__
 

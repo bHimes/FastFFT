@@ -45,5 +45,7 @@ build/*
 !build/build
 
 include/nvidia-mathdx-*
-include/cufftdx/
+include/cufftdx*
+.vscode/
+.vscode_shared/BenHimes/
 

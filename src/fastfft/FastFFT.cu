@@ -15,6 +15,10 @@
 #error "FFT_DEBUG_LEVEL must be defined"
 #endif
 
+// The cufftdx library code assumes that both shared_memory and shared_memory_input are aligned to 128 bits for optimal memory operations.
+// rather than saying extern __shared__ __align__(16) value_type shared_mem[]; we define the following instead.
+#define FastFFT_SMEM extern __shared__ __align__(16)
+
 namespace FastFFT {
 
 template <class ExternalImage_t, class FFT, class invFFT, class ComplexData_t, class PreOpType, class IntraOpType, class PostOpType>
@@ -28,7 +32,7 @@ __launch_bounds__(FFT::max_threads_per_block) __global__
     using scalar_compute_t  = typename complex_compute_t::value_type;
 
     // __shared__ complex_compute_t shared_mem[invFFT::shared_memory_size/sizeof(complex_compute_t)]; // Storage for the input data that is re-used each blcok
-    extern __shared__ complex_compute_t shared_mem[]; // Storage for the input data that is re-used each blcok
+    FastFFT_SMEM complex_compute_t shared_mem[]; // Storage for the input data that is re-used each blcok
 
     complex_compute_t thread_data[FFT::storage_size];
 
@@ -1014,7 +1018,7 @@ __global__ void thread_fft_kernel_R2C_decomposed(const InputData_t* __restrict__
     using complex_compute_t = typename FFT::value_type;
     using scalar_compute_t  = typename complex_compute_t::value_type;
     // The data store is non-coalesced, so don't aggregate the data in shared mem.
-    extern __shared__ complex_compute_t shared_mem[];
+    FastFFT_SMEM complex_compute_t shared_mem[];
 
     // Memory used by FFT - for Thread() type, FFT::storage_size == FFT::elements_per_thread == size_of<FFT>::value
     complex_compute_t thread_data[FFT::storage_size];
@@ -1036,7 +1040,7 @@ __global__ void thread_fft_kernel_R2C_decomposed_transposed(const InputData_t* _
     using complex_compute_t = typename FFT::value_type;
     using scalar_compute_t  = typename complex_compute_t::value_type;
     // The data store is non-coalesced, so don't aggregate the data in shared mem.
-    extern __shared__ complex_compute_t shared_mem[];
+    FastFFT_SMEM complex_compute_t shared_mem[];
 
     // Memory used by FFT - for Thread() type, FFT::storage_size == FFT::elements_per_thread == size_of<FFT>::value
     complex_compute_t thread_data[FFT::storage_size];
@@ -1060,7 +1064,7 @@ __launch_bounds__(FFT::max_threads_per_block) __global__
     using scalar_compute_t  = typename complex_compute_t::value_type;
 
     // The data store is non-coalesced, so don't aggregate the data in shared mem.
-    extern __shared__ complex_compute_t shared_mem[];
+    FastFFT_SMEM complex_compute_t shared_mem[];
 
     // Memory used by FFT
     complex_compute_t thread_data[FFT::storage_size];
@@ -1086,7 +1090,7 @@ __launch_bounds__(XZ_STRIDE* FFT::max_threads_per_block) __global__
     using scalar_compute_t  = typename complex_compute_t::value_type;
 
     // The data store is non-coalesced, so don't aggregate the data in shared mem.
-    extern __shared__ complex_compute_t shared_mem[];
+    FastFFT_SMEM complex_compute_t shared_mem[];
 
     // Memory used by FFT
     complex_compute_t thread_data[FFT::storage_size];
@@ -1112,8 +1116,8 @@ __launch_bounds__(FFT::max_threads_per_block) __global__
     using scalar_compute_t  = typename complex_compute_t::value_type;
 
     // The data store is non-coalesced, so don't aggregate the data in shared mem.
-    extern __shared__ scalar_compute_t shared_input[];
-    complex_compute_t*                 shared_mem = (complex_compute_t*)&shared_input[mem_offsets.shared_input];
+    FastFFT_SMEM scalar_compute_t shared_input[];
+    complex_compute_t*            shared_mem = (complex_compute_t*)&shared_input[mem_offsets.shared_input];
 
     // Memory used by FFT
     complex_compute_t twiddle;
@@ -1174,8 +1178,8 @@ __launch_bounds__(XZ_STRIDE* FFT::max_threads_per_block) __global__
     using scalar_compute_t  = typename complex_compute_t::value_type;
 
     // The data store is non-coalesced, so don't aggregate the data in shared mem.
-    extern __shared__ scalar_compute_t shared_input[];
-    complex_compute_t*                 shared_mem = (complex_compute_t*)&shared_input[XZ_STRIDE * mem_offsets.shared_input];
+    FastFFT_SMEM scalar_compute_t shared_input[];
+    complex_compute_t*            shared_mem = (complex_compute_t*)&shared_input[XZ_STRIDE * mem_offsets.shared_input];
 
     // Memory used by FFT
     complex_compute_t twiddle;
@@ -1237,7 +1241,7 @@ __global__ void block_fft_kernel_R2C_DECREASE_XY(const InputData_t* __restrict__
     using scalar_compute_t  = typename complex_compute_t::value_type;
 
     // The shared memory is used for storage, shuffling and fft ops at different stages and includes room for bank padding.
-    extern __shared__ complex_compute_t shared_mem[];
+    FastFFT_SMEM complex_compute_t shared_mem[];
 
     complex_compute_t thread_data[FFT::storage_size];
 
@@ -1266,7 +1270,7 @@ __global__ void thread_fft_kernel_C2C_decomposed_ConjMul(const ExternalImage_t* 
     using complex_compute_t = typename FFT::value_type;
     using scalar_compute_t  = typename complex_compute_t::value_type;
     // The data store is non-coalesced, so don't aggregate the data in shared mem.
-    extern __shared__ complex_compute_t shared_mem[];
+    FastFFT_SMEM complex_compute_t shared_mem[];
 
     // Memory used by FFT - for Thread() type, FFT::storage_size == FFT::elements_per_thread == size_of<FFT>::value
     complex_compute_t thread_data[FFT::storage_size];
@@ -1299,7 +1303,7 @@ __global__ void block_fft_kernel_C2C_FWD_NONE_INV_DECREASE_ConjMul(const Externa
     using complex_compute_t = typename FFT::value_type;
     using scalar_compute_t  = typename complex_compute_t::value_type;
 
-    extern __shared__ complex_compute_t shared_mem[];
+    FastFFT_SMEM complex_compute_t shared_mem[];
 
     complex_compute_t thread_data[FFT::storage_size];
 
@@ -1352,7 +1356,7 @@ __launch_bounds__(FFT::max_threads_per_block) __global__
     using complex_compute_t = typename FFT::value_type;
     using scalar_compute_t  = typename complex_compute_t::value_type;
 
-    extern __shared__ complex_compute_t shared_mem[]; // Storage for the input data that is re-used each blcok
+    FastFFT_SMEM complex_compute_t shared_mem[]; // Storage for the input data that is re-used each blcok
 
     // Memory used by FFT
     complex_compute_t thread_data[FFT::storage_size];
@@ -1374,7 +1378,7 @@ __launch_bounds__(XZ_STRIDE* FFT::max_threads_per_block) __global__
     using complex_compute_t = typename FFT::value_type;
     using scalar_compute_t  = typename complex_compute_t::value_type;
 
-    extern __shared__ complex_compute_t shared_mem[]; // Storage for the input data that is re-used each blcok
+    FastFFT_SMEM complex_compute_t shared_mem[]; // Storage for the input data that is re-used each blcok
 
     // Memory used by FFT
     complex_compute_t thread_data[FFT::storage_size];
@@ -1409,7 +1413,7 @@ __global__ void block_fft_kernel_C2C_DECREASE(const ComplexData_t* __restrict__ 
     using complex_compute_t = typename FFT::value_type;
     using scalar_compute_t  = typename complex_compute_t::value_type;
 
-    extern __shared__ complex_compute_t shared_mem[];
+    FastFFT_SMEM complex_compute_t shared_mem[];
 
     complex_compute_t thread_data[FFT::storage_size];
 
@@ -1438,9 +1442,9 @@ __global__ void block_fft_kernel_C2C_INCREASE(const ComplexData_t* __restrict__ 
     using complex_compute_t = typename FFT::value_type;
     using scalar_compute_t  = typename complex_compute_t::value_type;
 
-    extern __shared__ complex_compute_t shared_input_complex[]; // Storage for the input data that is re-used each blcok
-    complex_compute_t*                  shared_output = (complex_compute_t*)&shared_input_complex[mem_offsets.shared_input]; // storage for the coalesced output data. This may grow too large,
-    complex_compute_t*                  shared_mem    = (complex_compute_t*)&shared_output[mem_offsets.shared_output];
+    FastFFT_SMEM complex_compute_t shared_input_complex[]; // Storage for the input data that is re-used each blcok
+    complex_compute_t*             shared_output = (complex_compute_t*)&shared_input_complex[mem_offsets.shared_input]; // storage for the coalesced output data. This may grow too large,
+    complex_compute_t*             shared_mem    = (complex_compute_t*)&shared_output[mem_offsets.shared_output];
 
     // Memory used by FFT
     complex_compute_t thread_data[FFT::storage_size];
@@ -1482,9 +1486,9 @@ __launch_bounds__(FFT::max_threads_per_block) __global__
     using complex_compute_t = typename FFT::value_type;
     using scalar_compute_t  = typename complex_compute_t::value_type;
 
-    extern __shared__ complex_compute_t shared_input_complex[]; // Storage for the input data that is re-used each blcok
-    complex_compute_t*                  shared_output = (complex_compute_t*)&shared_input_complex[mem_offsets.shared_input]; // storage for the coalesced output data. This may grow too large,
-    complex_compute_t*                  shared_mem    = (complex_compute_t*)&shared_output[mem_offsets.shared_output];
+    FastFFT_SMEM complex_compute_t shared_input_complex[]; // Storage for the input data that is re-used each blcok
+    complex_compute_t*             shared_output = (complex_compute_t*)&shared_input_complex[mem_offsets.shared_input]; // storage for the coalesced output data. This may grow too large,
+    complex_compute_t*             shared_mem    = (complex_compute_t*)&shared_output[mem_offsets.shared_output];
 
     // Memory used by FFT
     complex_compute_t twiddle;
@@ -1540,7 +1544,7 @@ __global__ void thread_fft_kernel_C2C_decomposed(const ComplexData_t* __restrict
     using scalar_compute_t  = typename complex_compute_t::value_type;
 
     // The data store is non-coalesced, so don't aggregate the data in shared mem.
-    extern __shared__ complex_compute_t shared_mem[];
+    FastFFT_SMEM complex_compute_t shared_mem[];
 
     // Memory used by FFT - for Thread() type, FFT::storage_size == FFT::elements_per_thread == size_of<FFT>::value
     complex_compute_t thread_data[FFT::storage_size];
@@ -1564,7 +1568,7 @@ __launch_bounds__(XZ_STRIDE* FFT::max_threads_per_block) __global__
     using complex_compute_t = typename FFT::value_type;
     using scalar_compute_t  = typename complex_compute_t::value_type;
 
-    extern __shared__ complex_compute_t shared_mem[]; // Storage for the input data that is re-used each blcok
+    FastFFT_SMEM complex_compute_t shared_mem[]; // Storage for the input data that is re-used each blcok
 
     // Memory used by FFT
     complex_compute_t thread_data[FFT::storage_size];
@@ -1587,8 +1591,8 @@ __launch_bounds__(XZ_STRIDE* FFT::max_threads_per_block) __global__
     using complex_compute_t = typename FFT::value_type;
     using scalar_compute_t  = typename complex_compute_t::value_type;
 
-    extern __shared__ complex_compute_t shared_input_complex[]; // Storage for the input data that is re-used each blcok
-    complex_compute_t*                  shared_mem = (complex_compute_t*)&shared_input_complex[XZ_STRIDE * mem_offsets.shared_input]; // storage for computation and transposition (alternating)
+    FastFFT_SMEM complex_compute_t shared_input_complex[]; // Storage for the input data that is re-used each blcok
+    complex_compute_t*             shared_mem = (complex_compute_t*)&shared_input_complex[XZ_STRIDE * mem_offsets.shared_input]; // storage for computation and transposition (alternating)
 
     // Memory used by FFT
     complex_compute_t thread_data[FFT::storage_size];
@@ -1626,7 +1630,7 @@ __launch_bounds__(FFT::max_threads_per_block) __global__
     using complex_compute_t = typename FFT::value_type;
     using scalar_compute_t  = typename complex_compute_t::value_type;
 
-    extern __shared__ complex_compute_t shared_mem[];
+    FastFFT_SMEM complex_compute_t shared_mem[];
 
     complex_compute_t thread_data[FFT::storage_size];
 
@@ -1645,7 +1649,7 @@ __launch_bounds__(FFT::max_threads_per_block) __global__
     using complex_compute_t = typename FFT::value_type;
     using scalar_compute_t  = typename complex_compute_t::value_type;
 
-    extern __shared__ complex_compute_t shared_mem[];
+    FastFFT_SMEM complex_compute_t shared_mem[];
 
     complex_compute_t thread_data[FFT::storage_size];
 
@@ -1663,7 +1667,7 @@ __global__ void block_fft_kernel_C2R_DECREASE_XY(const InputData_t* __restrict__
     using complex_compute_t = typename FFT::value_type;
     using scalar_compute_t  = typename complex_compute_t::value_type;
 
-    extern __shared__ complex_compute_t shared_mem[];
+    FastFFT_SMEM complex_compute_t shared_mem[];
 
     complex_compute_t thread_data[FFT::storage_size];
 
@@ -1698,7 +1702,7 @@ __global__ void thread_fft_kernel_C2R_decomposed(const InputData_t* __restrict__
     ;
 
     // The data store is non-coalesced, so don't aggregate the data in shared mem.
-    extern __shared__ scalar_compute_t shared_mem_C2R_decomposed[];
+    FastFFT_SMEM scalar_compute_t shared_mem_C2R_decomposed[];
 
     // Memory used by FFT - for Thread() type, FFT::storage_size == FFT::elements_per_thread == size_of<FFT>::value
     complex_compute_t thread_data[FFT::storage_size];
@@ -1721,7 +1725,7 @@ __global__ void thread_fft_kernel_C2R_decomposed_transposed(const InputData_t* _
     using scalar_compute_t  = typename complex_compute_t::value_type;
 
     // The data store is non-coalesced, so don't aggregate the data in shared mem.
-    extern __shared__ scalar_compute_t shared_mem_transposed[];
+    FastFFT_SMEM scalar_compute_t shared_mem_transposed[];
 
     // Memory used by FFT - for Thread() type, FFT::storage_size == FFT::elements_per_thread == size_of<FFT>::value
     complex_compute_t thread_data[FFT::storage_size];
@@ -2213,7 +2217,12 @@ void FourierTransformer<ComputeBaseType, InputType, OtherImageType, Rank>::SetAn
         switch ( kernel_type ) {
             case r2c_none_XY: {
                 if constexpr ( FFT_ALGO_t == Generic_Fwd_FFT ) {
-                    using FFT               = decltype(FFT_base_arch( ) + Direction<fft_direction::forward>( ) + Type<fft_type::c2c>( ));
+
+#ifdef USE_FOLDED_R2C_C2R
+                    using FFT = decltype(FFT_base_arch( ) + Direction<fft_direction::forward>( ) + Type<fft_type::r2c>( ) + RealFFTOptions<complex_layout::natural, real_mode::folded>);
+#else
+                    using FFT = decltype(FFT_base_arch( ) + Direction<fft_direction::forward>( ) + Type<fft_type::c2c>( ));
+#endif
                     cudaError_t  error_code = cudaSuccess;
                     auto         workspace  = make_workspace<FFT>(error_code); // std::cout << " EPT: " << FFT::elements_per_thread << "kernel " << KernelName[kernel_type] << std::endl;
                     LaunchParams LP         = SetLaunchParameters(r2c_none_XY);
@@ -2251,7 +2260,11 @@ void FourierTransformer<ComputeBaseType, InputType, OtherImageType, Rank>::SetAn
                     if constexpr ( Rank == 3 ) {
                         MyFFTDebugAssertTrue(current_buffer == fastfft_external_input, "current_buffer != fastfft_external_input");
 
-                        using FFT               = decltype(FFT_base_arch( ) + Direction<fft_direction::forward>( ) + Type<fft_type::c2c>( ));
+#ifdef USE_FOLDED_R2C_C2R
+                        using FFT = decltype(FFT_base_arch( ) + Direction<fft_direction::forward>( ) + RealFFTOptions<complex_layout::natural, real_mode::folded>);
+#else
+                        using FFT = decltype(FFT_base_arch( ) + Direction<fft_direction::forward>( ) + Type<fft_type::c2c>( ));
+#endif
                         cudaError_t  error_code = cudaSuccess;
                         auto         workspace  = make_workspace<FFT>(error_code); // std::cout << " EPT: " << FFT::elements_per_thread << "kernel " << KernelName[kernel_type] << std::endl;
                         LaunchParams LP         = SetLaunchParameters(r2c_none_XZ);
@@ -2274,7 +2287,12 @@ void FourierTransformer<ComputeBaseType, InputType, OtherImageType, Rank>::SetAn
 
             case r2c_decrease_XY: {
                 if constexpr ( FFT_ALGO_t == Generic_Fwd_FFT ) {
-                    using FFT               = decltype(FFT_base_arch( ) + Direction<fft_direction::forward>( ) + Type<fft_type::c2c>( ));
+#ifdef USE_FOLDED_R2C_C2R
+                    using FFT = decltype(FFT_base_arch( ) + Direction<fft_direction::forward>( ) + RealFFTOptions<complex_layout::natural, real_mode::folded>);
+#else
+                    using FFT = decltype(FFT_base_arch( ) + Direction<fft_direction::forward>( ) + Type<fft_type::c2c>( ));
+#endif
+
                     cudaError_t  error_code = cudaSuccess;
                     auto         workspace  = make_workspace<FFT>(error_code); // std::cout << " EPT: " << FFT::elements_per_thread << "kernel " << KernelName[kernel_type] << std::endl;
                     LaunchParams LP         = SetLaunchParameters(r2c_decrease_XY);
@@ -2327,7 +2345,11 @@ void FourierTransformer<ComputeBaseType, InputType, OtherImageType, Rank>::SetAn
 
             case r2c_increase_XY: {
                 if constexpr ( FFT_ALGO_t == Generic_Fwd_FFT ) {
-                    using FFT               = decltype(FFT_base_arch( ) + Direction<fft_direction::forward>( ) + Type<fft_type::c2c>( ));
+#ifdef USE_FOLDED_R2C_C2R
+                    using FFT = decltype(FFT_base_arch( ) + Direction<fft_direction::forward>( ) + Type<fft_type::r2c>( ) + RealFFTOptions<complex_layout::natural, real_mode::folded>);
+#else
+                    using FFT = decltype(FFT_base_arch( ) + Direction<fft_direction::forward>( ) + Type<fft_type::c2c>( ));
+#endif
                     cudaError_t  error_code = cudaSuccess;
                     auto         workspace  = make_workspace<FFT>(error_code); // std::cout << " EPT: " << FFT::elements_per_thread << "kernel " << KernelName[kernel_type] << std::endl;
                     LaunchParams LP         = SetLaunchParameters(r2c_increase_XY);
@@ -2362,7 +2384,11 @@ void FourierTransformer<ComputeBaseType, InputType, OtherImageType, Rank>::SetAn
                 if constexpr ( FFT_ALGO_t == Generic_Fwd_FFT ) {
                     if constexpr ( Rank == 3 ) {
                         MyFFTDebugAssertTrue(current_buffer == fastfft_external_input, "current_buffer != fastfft_external_input");
-                        using FFT               = decltype(FFT_base_arch( ) + Direction<fft_direction::forward>( ) + Type<fft_type::c2c>( ));
+#ifdef USE_FOLDED_R2C_C2R
+                        using FFT = decltype(FFT_base_arch( ) + Direction<fft_direction::forward>( ) + Type<fft_type::r2c>( ) + RealFFTOptions<complex_layout::natural, real_mode::folded>);
+#else
+                        using FFT = decltype(FFT_base_arch( ) + Direction<fft_direction::forward>( ) + Type<fft_type::c2c>( ));
+#endif
                         cudaError_t  error_code = cudaSuccess;
                         auto         workspace  = make_workspace<FFT>(error_code); // FIXME: I don't think this is right when XZ_STRIDE is used
                         LaunchParams LP         = SetLaunchParameters(r2c_increase_XZ);
@@ -2703,7 +2729,11 @@ void FourierTransformer<ComputeBaseType, InputType, OtherImageType, Rank>::SetAn
 
             case c2r_none: {
                 if constexpr ( FFT_ALGO_t == Generic_Inv_FFT ) {
+#ifdef USE_FOLDED_R2C_C2R
+                    using FFT = decltype(FFT_base_arch( ) + Direction<fft_direction::inverse>( ) + Type<fft_type::c2r>( ) + RealFFTOptions<complex_layout::natural, real_mode::folded>);
+#else
                     using FFT = decltype(FFT_base_arch( ) + Direction<fft_direction::inverse>( ) + Type<fft_type::c2r>( ));
+#endif
 
                     LaunchParams LP = SetLaunchParameters(c2r_none);
 
@@ -2745,7 +2775,11 @@ void FourierTransformer<ComputeBaseType, InputType, OtherImageType, Rank>::SetAn
 
             case c2r_none_XY: {
                 if constexpr ( FFT_ALGO_t == Generic_Inv_FFT ) {
+#ifdef USE_FOLDED_R2C_C2R
+                    using FFT = decltype(FFT_base_arch( ) + Direction<fft_direction::inverse>( ) + Type<fft_type::c2r>( ) + RealFFTOptions<complex_layout::natural, real_mode::folded>);
+#else
                     using FFT = decltype(FFT_base_arch( ) + Direction<fft_direction::inverse>( ) + Type<fft_type::c2r>( ));
+#endif
 
                     LaunchParams LP = SetLaunchParameters(c2r_none_XY);
 
@@ -2794,7 +2828,11 @@ void FourierTransformer<ComputeBaseType, InputType, OtherImageType, Rank>::SetAn
 
             case c2r_decrease_XY: {
                 if constexpr ( FFT_ALGO_t == Generic_Inv_FFT ) {
+#ifdef USE_FOLDED_R2C_C2R
+                    using FFT = decltype(FFT_base_arch( ) + Direction<fft_direction::inverse>( ) + Type<fft_type::c2r>( ) + RealFFTOptions<complex_layout::natural, real_mode::folded>);
+#else
                     using FFT = decltype(FFT_base_arch( ) + Direction<fft_direction::inverse>( ) + Type<fft_type::c2r>( ));
+#endif
 
                     LaunchParams LP = SetLaunchParameters(c2r_decrease_XY);
 
