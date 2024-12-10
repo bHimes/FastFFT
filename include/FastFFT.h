@@ -29,6 +29,9 @@ inline void static_no_doubles( ) { static_assert(flag, "no doubles are allowed")
 template <bool flag = false>
 inline void static_no_half_support_yet( ) { static_assert(flag, "no __half support yet"); }
 
+template <bool flag = false>
+inline void static_no_thread_fft_support_yet( ) { static_assert(flag, "only block ffts are supported"); }
+
 // Currently the buffer types match the input type which also determines the output type.
 // The compute and otherImage type are independent.
 template <class C, class I, class OI>
@@ -405,8 +408,6 @@ class FourierTransformer {
 
     template <class FFT, class invFFT>
     void FFT_C2C_WithPadding_ConjMul_C2C_t(float2* image_to_search, bool swap_real_space_quadrants);
-    template <class FFT, class invFFT>
-    void FFT_C2C_decomposed_ConjMul_C2C_t(float2* image_to_search, bool swap_real_space_quadrants);
 
     void PrintLaunchParameters(LaunchParams LP) {
         std::cerr << "Launch parameters: " << std::endl;
@@ -462,9 +463,7 @@ class FourierTransformer {
     // FIXME: in the execution blocks, we should have some check that the correct direction is implemented.
     // Or better yet, have this templated and
 
-    enum KernelType { r2c_decomposed, // 1D fwd
-                      r2c_decomposed_transposed, // 2d fwd 1st stage
-                      r2c_none_XY, // 1d fwd  //  2d fwd 1st stage
+    enum KernelType { r2c_none_XY, // 1d fwd  //  2d fwd 1st stage
                       r2c_none_XZ, // 3d fwd 1st stage
                       r2c_decrease_XY,
                       r2c_increase_XY,
@@ -479,10 +478,6 @@ class FourierTransformer {
                       c2c_inv_none_XYZ,
                       c2c_inv_decrease,
                       c2c_inv_increase,
-                      c2c_fwd_decomposed,
-                      c2c_inv_decomposed,
-                      c2r_decomposed,
-                      c2r_decomposed_transposed,
                       c2r_none,
                       c2r_none_XY,
                       c2r_decrease_XY,
@@ -491,16 +486,13 @@ class FourierTransformer {
                       xcorr_fwd_decrease_inv_none, // (e.g. Fourier cropping)
                       xcorr_fwd_none_inv_decrease, // (e.g. movie/particle translational search)
                       xcorr_fwd_decrease_inv_decrease, // (e.g. bandlimit, xcorr, translational search)
-                      xcorr_decomposed,
                       generic_fwd_increase_op_inv_none,
                       COUNT };
 
     static const int n_kernel_types = static_cast<int>(KernelType::COUNT);
     // WARNING this is flimsy and prone to breaking, you must ensure the order matches the KernelType enum.
     std::array<std::string_view, n_kernel_types>
-            KernelName{"r2c_decomposed",
-                       "r2c_decomposed_transposed",
-                       "r2c_none_XY",
+            KernelName{"r2c_none_XY",
                        "r2c_none_XZ",
                        "r2c_decrease_XY",
                        "r2c_increase_XY",
@@ -515,10 +507,6 @@ class FourierTransformer {
                        "c2c_inv_none_XYZ",
                        "c2c_inv_decrease",
                        "c2c_inv_increase",
-                       "c2c_fwd_decomposed",
-                       "c2c_inv_decomposed",
-                       "c2r_decomposed",
-                       "c2r_decomposed_transposed",
                        "c2r_none",
                        "c2r_none_XY",
                        "c2r_decrease_XY",
@@ -527,17 +515,10 @@ class FourierTransformer {
                        "xcorr_fwd_decrease_inv_none",
                        "xcorr_fwd_none_inv_decrease",
                        "xcorr_fwd_decrease_inv_decrease",
-                       "xcorr_decomposed",
                        "generic_fwd_increase_op_inv_none"};
 
     // All in a column so it is obvious if a "==" is missing which will of course break the or co nditions and
     // always evaluate true.
-    inline bool IsThreadType(KernelType kernel_type) {
-        if ( KernelName.at(kernel_type).find("decomposed") != KernelName.at(kernel_type).npos )
-            return true;
-        else
-            return false;
-    }
 
     inline bool IsR2CType(KernelType kernel_type) {
         if ( KernelName.at(kernel_type).find("r2c_") != KernelName.at(kernel_type).npos )
@@ -619,7 +600,7 @@ class FourierTransformer {
 
     // 1.
     // First call passed from a public transform function, selects block or thread and the transform precision.
-    template <int FFT_ALGO_t, bool use_thread_method = false, class PreOpType = std::nullptr_t, class IntraOpType = std::nullptr_t, class PostOpType = std::nullptr_t>
+    template <int FFT_ALGO_t, class PreOpType = std::nullptr_t, class IntraOpType = std::nullptr_t, class PostOpType = std::nullptr_t>
     EnableIf<IfAppliesIntraOpFunctor_HasIntraOpFunctor<IntraOpType, FFT_ALGO_t>>
     SetPrecisionAndExectutionMethod(OtherImageType* other_image_ptr,
                                     KernelType      kernel_type,

@@ -19,6 +19,10 @@
 
 // clang-format on
 
+bool check_floats(float a, float b, float epsilon = 0.0001) {
+    return (fabsf(a - b) < epsilon);
+}
+
 void PrintArray(float2* array, short NX, short NY, short NZ, int line_wrapping = 34) {
     // COMPLEX TODO make these functions.
     int n = 0;
