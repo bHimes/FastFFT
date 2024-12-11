@@ -344,7 +344,8 @@ class FourierTransformer {
     SizeChangeType::Enum fwd_size_change_type;
     SizeChangeType::Enum inv_size_change_type;
 
-    bool implicit_dimension_change;
+    bool fwd_implicit_dimension_change;
+    bool inv_implicit_dimension_change;
 
     int transform_stage_completed;
 
@@ -416,7 +417,6 @@ class FourierTransformer {
         std::cerr << "  Grid dimensions: ";
         PrintVectorType(LP.gridDims);
         std::cerr << "  Q: " << LP.Q << std::endl;
-        std::cerr << "  Twiddle in: " << LP.twiddle_in << std::endl;
         std::cerr << "  shared input: " << LP.mem_offsets.shared_input << std::endl;
         std::cerr << "  shared output (memlimit in r2c): " << LP.mem_offsets.shared_output << std::endl;
         std::cerr << "  physical_x_input: " << LP.mem_offsets.physical_x_input << std::endl;
@@ -592,7 +592,7 @@ class FourierTransformer {
     GetTransformSize(KernelType kernel_type);
 
     void         GetTransformSize_thread(KernelType kernel_type, int thread_fft_size);
-    LaunchParams SetLaunchParameters(KernelType kernel_type);
+    LaunchParams SetLaunchParameters(KernelType kernel_type, const int ept);
 
     inline void SetEptForUseInLaunchParameters(const int elements_per_thread) {
         elements_per_thread_complex = elements_per_thread;
@@ -620,10 +620,10 @@ class FourierTransformer {
     // void SelectSizeAndType(KernelType kernel_type, bool do_forward_transform, PreOpType pre_op_functor, IntraOpType intra_op_functor, PostOpType post_op_functor);
     // This allows us to iterate through a set of constexpr sizes passed as a template parameter pack. The value is in providing a means to have different size packs
     // for different fft configurations, eg. 2d vs 3d
-    template <int FFT_ALGO_t, class FFT_base, class PreOpType, class IntraOpType, class PostOpType>
-    void SelectSizeAndType(OtherImageType* other_image_ptr, KernelType kernel_type, PreOpType pre_op_functor, IntraOpType intra_op_functor, PostOpType post_op_functor);
+    template <int FFT_ALGO_t, class FFT_base, class PreOpType, class IntraOpType, class PostOpType, unsigned int SizeValue>
+    void SelectSizeAndTypeWithFold(OtherImageType* other_image_ptr, KernelType kernel_type, PreOpType pre_op_functor, IntraOpType intra_op_functor, PostOpType post_op_functor);
 
-    template <int FFT_ALGO_t, class FFT_base, class PreOpType, class IntraOpType, class PostOpType, unsigned int SizeValue, unsigned int Ept, unsigned int... OtherValues>
+    template <int FFT_ALGO_t, class FFT_base, class PreOpType, class IntraOpType, class PostOpType, unsigned int... SizeValues>
     void SelectSizeAndType(OtherImageType* other_image_ptr, KernelType kernel_type, PreOpType pre_op_functor, IntraOpType intra_op_functor, PostOpType post_op_functor);
 
     // 3.
@@ -677,13 +677,23 @@ class FourierTransformer {
             return true;
     }
 
+    /**
+     * @brief Sets N,L,P,Q for the transform size.
+     * N is the full size of the transform, L is the number of non-zero elements in the input/output.
+     * P next closest power of 2 to L, Q = N/P = number of sub transforms to be calculated.
+     * 
+     * @param kernel_type 
+     * @param full_size_transform 
+     * @param number_non_zero_inputs_or_outputs 
+     */
     inline void AssertDivisibleAndFactorOf2(KernelType kernel_type, int full_size_transform, const int number_non_zero_inputs_or_outputs) {
 
         // The size we would need to use with a general purpose library, eg. FFTW
-        // Note: this is not limited by the power of 2 restriction as we can compose this with sub ffts that are power of 2
+        // Note: this is not necessarily limited by the power of 2 restriction as we can compose this with sub ffts that are power of 2,
+        // but the current implementation only deals with power of 2 sizes.
         transform_size.N = full_size_transform;
-        // The input/output size we care about. non-zero comes from zero padding, but probably doesn't make sense
-        // for a size reduction algo e.g. TODO: rename
+        // The input/output size we care about. Zeros are considered implicit, e.g. not in physical memory.
+        // There are cases in the inverse transform where we may actually have those values calculated, but are never written to global memory.
         transform_size.L = number_non_zero_inputs_or_outputs;
 
         // Get the closest >= power of 2

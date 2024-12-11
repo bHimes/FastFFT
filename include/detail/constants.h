@@ -2,17 +2,24 @@
 #define __INCLUDE_DETAIL_CONSTANTS_H__
 
 namespace FastFFT {
-// TODO this probably needs to depend on the size of the xform, at least small vs large.
-constexpr const int elements_per_thread_16   = 4;
-constexpr const int elements_per_thread_32   = 8;
-constexpr const int elements_per_thread_64   = 8;
-constexpr const int elements_per_thread_128  = 8;
-constexpr const int elements_per_thread_256  = 8;
-constexpr const int elements_per_thread_512  = 8;
-constexpr const int elements_per_thread_1024 = 8;
-constexpr const int elements_per_thread_2048 = 8;
-constexpr const int elements_per_thread_4096 = 8;
-constexpr const int elements_per_thread_8192 = 16;
+
+template <unsigned int V>
+struct elements_per_thread_default {
+    static constexpr unsigned int value =
+            V == 16 ? 4 : V == 32 ? 8
+                  : V == 64       ? 8
+                  : V == 128      ? 8
+                  : V == 256      ? 8
+                  : V == 512      ? 8
+                  : V == 1024     ? 8
+                  : V == 2048     ? 8
+                  : V == 4096     ? 16
+                  : V == 8192     ? 16
+                                  : 0;
+};
+
+template <unsigned int V>
+static constexpr unsigned int elements_per_thread_default_v = elements_per_thread_default<V>::value;
 
 } // namespace FastFFT
 

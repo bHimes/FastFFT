@@ -8,7 +8,7 @@ typedef struct __align__(8) _FFT_Size {
     short N; // N : 1d FFT size
     short L; // L : number of non-zero output/input points
     short P; // P >= L && N % P == 0 : The size of the sub-FFT used to compute the full transform. Currently also must be a power of 2.
-    short Q; // Q = N/P : The number of sub-FFTs used to compute the full transform
+    short Q; // Q = N/P : The number of sub-FFTs used to compute the full transformexp_i2pi_N
 }
 
 FFT_Size;
@@ -23,11 +23,10 @@ typedef struct __align__(8) _Offsets {
 Offsets;
 
 typedef struct __align__(64) _LaunchParams {
-    int     Q;
-    float   twiddle_in;
-    dim3    gridDims;
-    dim3    threadsPerBlock;
-    Offsets mem_offsets;
+    int     Q; // sizeof(int) = 4
+    dim3    gridDims; // sizeof(unsigned int) * 3 = 12
+    dim3    threadsPerBlock; // sizeof(unsigned int) * 3 = 12
+    Offsets mem_offsets; // sizeof(unsigned short int) * 4 = 8
 }
 
 LaunchParams;
