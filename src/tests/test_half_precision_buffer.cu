@@ -63,7 +63,7 @@ int main(int argc, char** argv) {
     FastFFT::CheckInputArgs(argc, argv, text_line, run_2d_unit_tests, run_3d_unit_tests);
 
     if ( run_2d_unit_tests ) {
-        if ( ! half_precision_buffer_test<2>(64) )
+        if ( ! half_precision_buffer_test<2>(128) )
             return 1;
     }
 

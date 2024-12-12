@@ -416,7 +416,6 @@ class FourierTransformer {
         PrintVectorType(LP.threadsPerBlock);
         std::cerr << "  Grid dimensions: ";
         PrintVectorType(LP.gridDims);
-        std::cerr << "  Q: " << LP.Q << std::endl;
         std::cerr << "  shared input: " << LP.mem_offsets.shared_input << std::endl;
         std::cerr << "  shared output (memlimit in r2c): " << LP.mem_offsets.shared_output << std::endl;
         std::cerr << "  physical_x_input: " << LP.mem_offsets.physical_x_input << std::endl;
@@ -620,15 +619,29 @@ class FourierTransformer {
     // void SelectSizeAndType(KernelType kernel_type, bool do_forward_transform, PreOpType pre_op_functor, IntraOpType intra_op_functor, PostOpType post_op_functor);
     // This allows us to iterate through a set of constexpr sizes passed as a template parameter pack. The value is in providing a means to have different size packs
     // for different fft configurations, eg. 2d vs 3d
-    template <int FFT_ALGO_t, class FFT_base, class PreOpType, class IntraOpType, class PostOpType, unsigned int SizeValue>
+    template <int FFT_ALGO_t, int Q, class FFT_base, class PreOpType, class IntraOpType, class PostOpType, unsigned int SizeValue>
     void SelectSizeAndTypeWithFold(OtherImageType* other_image_ptr, KernelType kernel_type, PreOpType pre_op_functor, IntraOpType intra_op_functor, PostOpType post_op_functor);
 
-    template <int FFT_ALGO_t, class FFT_base, class PreOpType, class IntraOpType, class PostOpType, unsigned int... SizeValues>
+    template <int FFT_ALGO_t, int Q, class FFT_base, class PreOpType, class IntraOpType, class PostOpType, unsigned int... SizeValues>
     void SelectSizeAndType(OtherImageType* other_image_ptr, KernelType kernel_type, PreOpType pre_op_functor, IntraOpType intra_op_functor, PostOpType post_op_functor);
+
+    template <int FFT_ALGO_t, class FFT_base, class PreOpType, class IntraOpType, class PostOpType, int QValue>
+    void SelectQValuesWithFold(OtherImageType* other_image_ptr,
+                               KernelType      kernel_type,
+                               PreOpType       pre_op_functor,
+                               IntraOpType     intra_op_functor,
+                               PostOpType      post_op_functor);
+
+    template <int FFT_ALGO_t, class FFT_base, class PreOpType, class IntraOpType, class PostOpType, int... QValues>
+    void SelectQValues(OtherImageType* other_image_ptr,
+                       KernelType      kernel_type,
+                       PreOpType       pre_op_functor,
+                       IntraOpType     intra_op_functor,
+                       PostOpType      post_op_functor);
 
     // 3.
     // Third call, sets the input and output dimensions and type
-    template <int FFT_ALGO_t, class FFT_base_arch, class PreOpType, class IntraOpType, class PostOpType>
+    template <int FFT_ALGO_t, int Q, class FFT_base_arch, class PreOpType, class IntraOpType, class PostOpType>
     void SetAndLaunchKernel(OtherImageType* other_image_ptr, KernelType kernel_type, PreOpType pre_op_functor, IntraOpType intra_op_functor, PostOpType post_op_functor);
 
     short padding_jump_val_;

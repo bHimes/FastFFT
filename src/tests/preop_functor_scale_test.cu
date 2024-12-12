@@ -411,6 +411,8 @@ int main(int argc, char** argv) {
         // preop_functor_scale<2>(FastFFT::test_size, size_change_type, false);
     }
 
+#ifdef FastFFT_3d_instantiation
+
     if ( run_3d_performance_tests ) {
 #ifdef HEAVYERRORCHECKING_FFT
         std::cout << "Running performance tests with heavy error checking.\n";
@@ -430,6 +432,7 @@ int main(int argc, char** argv) {
         // size_change_type = SCT::decrease;
         // preop_functor_scale(FastFFT::test_size, do_3d, size_change_type, false);
     }
+#endif
 
     return 0;
 };

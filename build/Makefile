@@ -11,7 +11,7 @@ NVCC_FLAGS+=--expt-relaxed-constexpr
 NVCC_FLAGS+=-DCUFFTDX_DISABLE_RUNTIME_ASSERTS
 
 # Don't explicitly instantiate the 3d versions unless requested
-NVCC_FLAGS+=-DFastFFT_3d_instantiation
+# NVCC_FLAGS+=-DFastFFT_3d_instantiation
 NVCC_FLAGS+=-DCUFFTDX_DISABLE_CUTLASS_DEPENDENCY
 
 # Gencode arguments, only supporting Volta or newer

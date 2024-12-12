@@ -174,6 +174,7 @@ bool unit_impulse_test(std::vector<int> size, bool do_increase_size, bool inplac
 
                 sum = host_output.ReturnSumOfReal(host_output.real_values, dims_fwd_out);
                 if ( sum != dims_fwd_out.x * dims_fwd_out.y * dims_fwd_out.z ) {
+                    std::cout << "sum " << sum << " " << dims_fwd_out.x * dims_fwd_out.y * dims_fwd_out.z << std::endl;
                     all_passed                      = false;
                     FastFFT_roundTrip_passed[iSize] = false;
                 }

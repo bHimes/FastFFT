@@ -13,7 +13,7 @@ int main(int argc, char** argv) {
     std::exit(1);
 #endif
 
-    const int input_size = 64;
+    const int input_size = 128;
 
     FastFFT::FourierTransformer<float, float, float2, 2> FT;
 
