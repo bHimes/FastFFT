@@ -194,6 +194,7 @@ bool const_image_test(std::vector<int>& size) {
             all_passed                  = false;
             FastFFT_roundTrip_passed[n] = false;
         }
+        std::cerr << "sum " << sum << " full_sum " << full_sum << std::endl;
         MyFFTDebugAssertTestTrue(check_floats(sum, float(full_sum)), "FastFFT constant image round trip for size " + std::to_string(dims_in.x));
 
         if constexpr ( use_fp16_io_buffers ) {
@@ -237,7 +238,7 @@ int main(int argc, char** argv) {
 
     if ( run_2d_unit_tests ) {
         constexpr bool start_with_fp16 = false;
-        constexpr bool start_with_fp32 = ! start_with_fp16;
+        // constexpr bool start_with_fp32 = ! start_with_fp16;
         // Test 4 is failing, I suspect it is a data movement issue
         if ( ! const_image_test<2, start_with_fp16>(FastFFT::test_size) )
             return 1;

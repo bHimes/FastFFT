@@ -11,19 +11,37 @@ The previous approach to handling the twiddle factors was to:
     
 
 - This can be improved 2 ways 
-    - if we label twiddle_factor_args[0] = exp(aj) where j = index
-        - index is incremented by FFT::stride => S
-        - twiddle_factor_args[1] = exp(a(j+s)) = exp(aj)exp(as)
-        - twiddle_factor_args[2] = exp(a(j+2s))= exp(aj)exp(a2s) = exp(aj)exp(as)exp(as)
-        - so if instead of saving 8 float twiddle_factor_args, we can instead calculate 1 extra complex floats
-            - then each iteration we for i > 0 we just multiply by exp(as)
-            - this reduces the register count by 6 floats (6 registers) per thread
-            - this also reduces the instruction count
-        - Testing the absolute difference between methods compared to double precision
-            - This is assuming 64 ept for a 512 sequence, far more than we'll ever use in order to make the new approach as bad as it can be by accumulating error 
-                - To me these are effectively the same error
-            - avg diff old = -6.41448e-08 -1.47702e-08
-            - avg diff new = 3.05154e-08 -6.6284e-08
-        - sincosf max error 2 ulps
-        - powf max error 4 ulps - also composed of exp2f and a log2f and a sum, so it is actually slower than sincosf
-        - Because we always have an angle < 2pi, (2pi/N*k where k <=N) we always use the fast path on the GPU
+    - After playing around a bit, I don't think this is going to be helpful. There will be too many compile time values, which need to be stored somewhere.
+        - either in global or const mem (which has more latency than calc sincosf)
+        - or in registers, which defeats the goal of reducing register pressure. Leaving these notes for now.
+            - if we label twiddle_factor_args[0] = exp(aj) where j = index
+                - index is incremented by FFT::stride => S
+                - twiddle_factor_args[1] = exp(a(j+s)) = exp(aj)exp(as)
+                - twiddle_factor_args[2] = exp(a(j+2s))= exp(aj)exp(a2s) = exp(aj)exp(as)exp(as)
+                - so if instead of saving 8 float twiddle_factor_args, we can instead calculate 1 extra complex floats
+                    - then each iteration we for i > 0 we just multiply by exp(as)
+                    - this reduces the register count by 6 floats (6 registers) per thread
+                    - this also reduces the instruction count
+                - Testing the absolute difference between methods compared to double precision
+                    - This is assuming 64 ept for a 512 sequence, far more than we'll ever use in order to make the new approach as bad as it can be by accumulating error 
+                        - To me these are effectively the same error
+                    - avg diff old = -6.41448e-08 -1.47702e-08
+                    - avg diff new = 3.05154e-08 -6.6284e-08
+                - sincosf max error 2 ulps
+                - powf max error 4 ulps - also composed of exp2f and a log2f and a sum, so it is actually slower than sincosf
+                - Because we always have an angle < 2pi, (2pi/N*k where k <=N) we always use the fast path on the GPU
+
+- General reuse of shared mem looks like
+    - load input to shared to register
+    - calc twiddle and store in temp complex
+    - multiply regsiter * temp complex
+- This should be better, particularly when the data are real, to just calc twiddle into the FFT storage, then multiply in place when reading in the data from shared. This will remove the extra temp and in the case of scalar inputs, reduce math from vector mul to scalar * complex
+
+
+block_fft_kernel_R2C_NONE_XY
+block_fft_kernel_R2C_INCREASE_XY
+
+check convert if needed in (was float to x/y now directly to complex which I think didn't work before)
+    copy_from_shared_and_twiddle
+    load_r2c_shared
+not actually using ComplexConjMulAndScale or ComplexMulAndScale

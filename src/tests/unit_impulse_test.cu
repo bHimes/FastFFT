@@ -133,13 +133,14 @@ bool unit_impulse_test(std::vector<int> size, bool do_increase_size, bool inplac
             // We don't want this to break compilation of other tests, so only check at runtime.
             if constexpr ( FFT_DEBUG_STAGE < 5 ) {
                 if ( do_increase_size ) {
-
+                    std::cout << "if size in/out " << dims_fwd_in.x << ", " << dims_fwd_out.x << std::endl;
                     FT.CopyDeviceToHostAndSynchronize(host_output.real_values);
                     // Right now, only testing a size change on the forward transform,
                     continue_debugging = debug_partial_fft<FFT_DEBUG_STAGE, Rank>(host_output, dims_fwd_in, dims_fwd_out, dims_inv_in, dims_inv_out, __LINE__);
                     sum                = host_output.ReturnSumOfComplexAmplitudes(host_output.complex_values, host_output.real_memory_allocated / 2);
                 }
                 else {
+                    std::cout << "else size in/out " << dims_inv_in.x << ", " << dims_inv_out.x << std::endl;
                     FT.CopyDeviceToHostAndSynchronize(host_input.real_values, FT.ReturnInputMemorySize( ));
                     continue_debugging = debug_partial_fft<FFT_DEBUG_STAGE, Rank>(host_input, dims_fwd_in, dims_fwd_out, dims_inv_in, dims_inv_out, __LINE__);
                     sum                = host_input.ReturnSumOfComplexAmplitudes(host_input.complex_values, host_input.real_memory_allocated / 2);

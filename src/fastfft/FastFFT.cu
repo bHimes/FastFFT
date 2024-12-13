@@ -25,9 +25,12 @@
 // This can lead to poorer occupance. I might be able to scale the suggested EPT by the ratio of expected shared mem to wanted as a proxy for problem size.
 // #define USE_SUGGESTED_EPT
 
-constexpr unsigned int c2r_scalar = 4;
-
 namespace FastFFT {
+
+template <>
+void CheckInputSizeMacroForPowerOfTwo<0>( ) {
+    CheckInputSizeMacroForPowerOfTwo<FastFFT_allowed_FFT_sizes_2D_lte08>( );
+}
 
 // If we are using the suggested ept we need to scale some down that otherwise requiest too many registers as cufftdx is unaware of the higher order transforms.
 template <class Description>
@@ -75,24 +78,24 @@ __launch_bounds__(FFT::max_threads_per_block) __global__
     // It may be worth trying to use threadIdx.y as in the DECREASE methods.
     // Until then, this
 
-    io<FFT>::load(&input_values[Return1DFFTAddress(size_of<FFT>::value / apparent_Q)], thread_data, size_of<FFT>::value / apparent_Q, pre_op_functor);
+    io<FFT, Q>::load(&input_values[Return1DFFTAddress(size_of<FFT>::value / apparent_Q)], thread_data, size_of<FFT>::value / apparent_Q, pre_op_functor);
 
     // In the first FFT the modifying twiddle factor is 1 so the data are reeal
     FFT( ).execute(thread_data, shared_mem, workspace_fwd);
 
 #if FFT_DEBUG_STAGE > 3
     //  * apparent_Q
-    io<invFFT>::load_shared(&image_to_search[Return1DFFTAddress(size_of<FFT>::value)],
-                            thread_data,
-                            intra_op_functor);
+    io<invFFT, Q>::load_shared_with_functor(&image_to_search[Return1DFFTAddress(size_of<FFT>::value)],
+                                            thread_data,
+                                            intra_op_functor);
 #endif
 
 #if FFT_DEBUG_STAGE > 4
     invFFT( ).execute(thread_data, shared_mem, workspace_inv);
-    io<invFFT>::store(thread_data, &output_values[Return1DFFTAddress(size_of<FFT>::value)], post_op_functor);
+    io<invFFT, Q>::store(thread_data, &output_values[Return1DFFTAddress(size_of<FFT>::value)], post_op_functor);
 #else
     // Do not do the post op lambda if the invFFT is not used.
-    io<invFFT>::store(thread_data, &output_values[Return1DFFTAddress(size_of<FFT>::value)]);
+    io<invFFT, Q>::store(thread_data, &output_values[Return1DFFTAddress(size_of<FFT>::value)]);
 #endif
 }
 
@@ -361,6 +364,7 @@ EnableIf<IsAllowedInputType<InputType>>
 FourierTransformer<ComputeBaseType, InputType, OtherImageType, Rank>::Generic_Fwd(PreOpType   pre_op_functor,
                                                                                   IntraOpType intra_op_functor) {
 
+    // FIXME: Currently this does nothing, not sure why I have it here.
     SetDimensions(DimensionCheckType::FwdTransform);
 
     // TODO: extend me
@@ -480,6 +484,7 @@ EnableIf<IsAllowedInputType<InputType>>
 FourierTransformer<ComputeBaseType, InputType, OtherImageType, Rank>::Generic_Inv(IntraOpType intra_op,
                                                                                   PostOpType  post_op) {
 
+    // FIXME: Currently this does nothing, not sure why I have it here.
     SetDimensions(DimensionCheckType::InvTransform);
     MyFFTRunTimeAssertFalse(fwd_implicit_dimension_change, "Implicit dimension change not yet supported for InvFFT");
     MyFFTRunTimeAssertFalse(inv_implicit_dimension_change, "Implicit dimension change not yet supported for InvFFT");
@@ -943,7 +948,19 @@ void FourierTransformer<ComputeBaseType, InputType, OtherImageType, Rank>::SetDi
                 memory_size_to_copy_ = inv_output_memory_wanted_;
             }
         } // switch transform_stage_completed
-        break;
+        case DimensionCheckType::FwdTransform: {
+            // FIXME: Currently this does nothing, not sure why I have it here.
+            // MyFFTDebugAssertTrue(false, "FwdTransform should not be used as an arg to SetDimensions");
+            break;
+        }
+        case DimensionCheckType::InvTransform: {
+            // FIXME: Currently this does nothing, not sure why I have it here.
+            // MyFFTDebugAssertTrue(false, "InvTransform should not be used as an arg to SetDimensions");
+            break;
+        }
+        default: {
+            MyFFTDebugAssertTrue(false, "Invalid check op type");
+        }
 
     } // end switch on operation type
 }
@@ -1009,13 +1026,17 @@ __launch_bounds__(FFT::max_threads_per_block) __global__
 
     // No need to __syncthreads as each thread only accesses its own shared mem anyway
     // multiply Q*fwd_dims_out.w because x maps to y in the output transposed FFT
-    io<FFT>::load_r2c(&input_values[Return1DFFTAddress(mem_offsets.physical_x_input)], thread_data);
-    // io<FFT>::load_r2c(&input_values[blockIdx.y*mem_offsets.physical_x_input], thread_data);
+    io<FFT, Q>::load_r2c(&input_values[Return1DFFTAddress(mem_offsets.physical_x_input)], thread_data);
+    // io<FFT,Q>::load_r2c(&input_values[blockIdx.y*mem_offsets.physical_x_input], thread_data);
 
     // In the first FFT the modifying twiddle factor is 1 so the data are real
     FFT( ).execute(thread_data, shared_mem, workspace);
 
-    io<FFT>::store_r2c_transposed_xy(thread_data, &output_values[ReturnZplane(gridDim.y, mem_offsets.physical_x_output)], gridDim.y);
+    io<FFT, Q>::store_r2c_transposed_xy<false>(thread_data,
+                                               &output_values[ReturnZplane(gridDim.y, mem_offsets.physical_x_output)],
+                                               gridDim.y,
+                                               0,
+                                               0);
 }
 
 // 2 ffts/block via threadIdx.x, notice launch bounds. Creates partial coalescing.
@@ -1033,17 +1054,17 @@ __launch_bounds__(XZ_STRIDE* FFT::max_threads_per_block) __global__
     // Memory used by FFT
     complex_compute_t thread_data[FFT::storage_size];
 
-    io<FFT>::load_r2c(&input_values[Return1DFFTAddress_strided_Z(mem_offsets.physical_x_input)], thread_data);
+    io<FFT, Q>::load_r2c(&input_values[Return1DFFTAddress_strided_Z(mem_offsets.physical_x_input)], thread_data);
 
     constexpr const unsigned int n_compute_elements = FFT::shared_memory_size / sizeof(complex_compute_t);
     FFT( ).execute(thread_data, &shared_mem[threadIdx.y * n_compute_elements], workspace);
     __syncthreads( ); // TODO: is this needed?
 
     // memory is at least large enough to hold the output with padding. synchronizing
-    io<FFT>::transpose_r2c_in_shared_XZ(shared_mem, thread_data);
+    io<FFT, Q>::transpose_r2c_in_shared_XZ(shared_mem, thread_data);
 
     // Transpose XZ, so the proper Z dimension now comes from X
-    io<FFT>::store_r2c_transposed_xz_strided_Z(shared_mem, output_values);
+    io<FFT, Q>::store_r2c_transposed_xz_strided_Z(shared_mem, output_values);
 }
 
 template <class FFT, int Q, class InputData_t, class OutputData_t>
@@ -1058,59 +1079,56 @@ __launch_bounds__(FFT::max_threads_per_block) __global__
     complex_compute_t*            shared_mem = (complex_compute_t*)&shared_input[mem_offsets.shared_input];
 
     // Memory used by FFT
-    complex_compute_t twiddle;
     complex_compute_t thread_data[FFT::storage_size];
-
-    // To re-map the thread index to the data ... these really could be short ints, but I don't know how that will perform. TODO benchmark
-    // It is also questionable whether storing these vs, recalculating makes more sense.
-    int   input_MAP[FFT::storage_size];
-    int   output_MAP[FFT::storage_size];
-    float twiddle_factor_args[FFT::storage_size];
 
     // No need to __syncthreads as each thread only accesses its own shared mem anyway
     // multiply Q*fwd_dims_out.w because x maps to y in the output transposed FFT
-    io<FFT>::load_r2c_shared(&input_values[Return1DFFTAddress(mem_offsets.physical_x_input)],
-                             shared_input,
-                             thread_data,
-                             twiddle_factor_args,
-                             input_MAP,
-                             output_MAP,
-                             Q);
+    io<FFT, Q>::load_r2c_shared(&input_values[Return1DFFTAddress(mem_offsets.physical_x_input)],
+                                shared_input,
+                                thread_data);
 
     // We unroll the first and last loops.
     // In the first FFT the modifying twiddle factor is 1 so the data are real
     FFT( ).execute(thread_data, shared_mem, workspace);
 
-    io<FFT>::store_r2c_transposed_xy(thread_data, &output_values[ReturnZplane(blockDim.y, mem_offsets.physical_x_output)], output_MAP, gridDim.y);
+    io<FFT, Q>::store_r2c_transposed_xy<false>(thread_data,
+                                               &output_values[ReturnZplane(blockDim.y, mem_offsets.physical_x_output)],
+                                               gridDim.y,
+                                               0,
+                                               0);
 
-    // For the other fragments we need the initial twiddle
-    for ( int sub_fft = 1; sub_fft < Q - 1; sub_fft++ ) {
-        io<FFT>::copy_from_shared(shared_input, thread_data, input_MAP);
-        for ( int i = 0; i < FFT::elements_per_thread; i++ ) {
-            // Pre shift with twiddle
-            SINCOS(twiddle_factor_args[i] * sub_fft, &twiddle.y, &twiddle.x);
-            thread_data[i] *= twiddle;
-            // increment the output mapping.
-            output_MAP[i]++;
+    if constexpr ( Q > 1 ) {
+        // For the other fragments we need the initial twiddle
+        for ( unsigned int sub_fft = 1; sub_fft < Q - 1; sub_fft++ ) {
+            io<FFT, Q>::copy_from_shared_and_twiddle(shared_input,
+                                                     thread_data,
+                                                     sub_fft);
+
+            FFT( ).execute(thread_data,
+                           shared_mem,
+                           workspace);
+
+            io<FFT, Q>::store_r2c_transposed_xy<false>(thread_data,
+                                                       &output_values[ReturnZplane(blockDim.y, mem_offsets.physical_x_output)],
+                                                       gridDim.y,
+                                                       sub_fft,
+                                                       0);
         }
-        FFT( ).execute(thread_data, shared_mem, workspace);
-
-        io<FFT>::store_r2c_transposed_xy(thread_data, &output_values[ReturnZplane(blockDim.y, mem_offsets.physical_x_output)], output_MAP, gridDim.y);
     }
 
     // For the last fragment we need to also do a bounds check.
-    io<FFT>::copy_from_shared(shared_input, thread_data, input_MAP);
-    for ( int i = 0; i < FFT::elements_per_thread; i++ ) {
-        // Pre shift with twiddle
-        SINCOS(twiddle_factor_args[i] * (Q - 1), &twiddle.y, &twiddle.x);
-        thread_data[i] *= twiddle;
-        // increment the output mapping.
-        output_MAP[i]++;
-    }
+    constexpr unsigned int last_sub_fft = Q - 1;
+    io<FFT, Q>::copy_from_shared_and_twiddle(shared_input,
+                                             thread_data,
+                                             last_sub_fft);
 
     FFT( ).execute(thread_data, shared_mem, workspace);
 
-    io<FFT>::store_r2c_transposed_xy(thread_data, &output_values[ReturnZplane(blockDim.y, mem_offsets.physical_x_output)], output_MAP, gridDim.y, mem_offsets.physical_x_output);
+    io<FFT, Q>::store_r2c_transposed_xy<true>(thread_data,
+                                              &output_values[ReturnZplane(blockDim.y, mem_offsets.physical_x_output)],
+                                              gridDim.y,
+                                              last_sub_fft,
+                                              mem_offsets.physical_x_output);
 }
 
 template <class FFT, int Q, class InputData_t, class OutputData_t>
@@ -1132,27 +1150,34 @@ __launch_bounds__(XZ_STRIDE* FFT::max_threads_per_block) __global__
     // Note: Q is used to calculate the strided output, which in this use, will end up being an offest in Z, so
     // we multiply by the NXY physical mem size of the OUTPUT array (which will be ZY') Then in the sub_fft loop, instead of adding one
     // we add NXY
-    io<FFT>::load_r2c_shared(&input_values[Return1DFFTAddress_strided_Z(mem_offsets.physical_x_input)],
-                             &shared_input[threadIdx.y * mem_offsets.shared_input],
-                             thread_data);
+    io<FFT, Q>::load_r2c_shared(&input_values[Return1DFFTAddress_strided_Z(mem_offsets.physical_x_input)],
+                                &shared_input[threadIdx.y * mem_offsets.shared_input],
+                                thread_data);
 
     FFT( ).execute(thread_data, &shared_mem[threadIdx.y * FFT::shared_memory_size / sizeof(complex_compute_t)], workspace);
     __syncthreads( );
     // Now we have a partial strided output due to the transform decomposition. In the 2D case we either write it out, or coalsece it in to shared memory
     // until we have the full output. Here, we are working on a tile, so we can transpose the data, and write it out partially coalesced.
 
-    io<FFT>::transpose_r2c_in_shared_XZ(shared_mem, thread_data);
-    io<FFT>::store_r2c_transposed_xz_strided_Z(shared_mem, output_values, Q, 0);
+    io<FFT, Q>::transpose_r2c_in_shared_XZ(shared_mem, thread_data);
+    io<FFT, Q>::store_r2c_transposed_xz_strided_Z(shared_mem, output_values, Q, 0);
 
     // Now we need to loop over the remaining fragments.
     // For the other fragments we need the initial twiddle
     for ( unsigned int sub_fft = 1; sub_fft < Q; sub_fft++ ) {
-        io<FFT>::copy_from_shared_and_twiddle(&shared_input[threadIdx.y * mem_offsets.shared_input], thread_data);
+        io<FFT, Q>::copy_from_shared_and_twiddle(&shared_input[threadIdx.y * mem_offsets.shared_input],
+                                                 thread_data);
 
-        FFT( ).execute(thread_data, &shared_mem[threadIdx.y * FFT::shared_memory_size / sizeof(complex_compute_t)], workspace); // FIXME the workspace is probably not going to work with the batched, look at the examples to see what to do.
+        FFT( ).execute(thread_data,
+                       &shared_mem[threadIdx.y * FFT::shared_memory_size / sizeof(complex_compute_t)],
+                       workspace); // FIXME the workspace is probably not going to work with the batched, look at the examples to see what to do.
         __syncthreads( );
-        io<FFT>::transpose_r2c_in_shared_XZ(shared_mem, thread_data);
-        io<FFT>::store_r2c_transposed_xz_strided_Z(shared_mem, output_values, Q, sub_fft);
+        io<FFT, Q>::transpose_r2c_in_shared_XZ(shared_mem,
+                                               thread_data);
+        io<FFT, Q>::store_r2c_transposed_xz_strided_Z(shared_mem,
+                                                      output_values,
+                                                      Q,
+                                                      sub_fft);
     }
 }
 
@@ -1170,10 +1195,10 @@ __launch_bounds__(FFT::max_threads_per_block) __global__
     complex_compute_t thread_data[FFT::storage_size];
 
     // Load in natural order
-    io<FFT>::load_r2c_shared_and_pad(&input_values[Return1DFFTAddress(mem_offsets.physical_x_input)], shared_mem);
+    io<FFT, Q>::load_r2c_shared_and_pad(&input_values[Return1DFFTAddress(mem_offsets.physical_x_input)], shared_mem);
 
     // DIT shuffle, bank conflict free
-    io<FFT>::copy_from_shared(shared_mem, thread_data, Q);
+    io<FFT, Q>::copy_from_shared_strided_Q(shared_mem, thread_data);
 
     // The FFT operator has no idea we are using threadIdx.y to get multiple sub transforms, so we need to
     // segment the shared memory it accesses to avoid conflicts.
@@ -1182,10 +1207,10 @@ __launch_bounds__(FFT::max_threads_per_block) __global__
     __syncthreads( );
 
     // Full twiddle multiply and store in natural order in shared memory
-    io<FFT>::reduce_block_fft(thread_data, shared_mem, Q);
+    io<FFT, Q>::reduce_block_fft(thread_data, shared_mem);
 
     // Reduce from shared memory into registers, ending up with only P valid outputs.
-    io<FFT>::store_r2c_reduced(thread_data, &output_values[mem_offsets.physical_x_output * threadIdx.y], gridDim.y, mem_offsets.physical_x_output);
+    io<FFT, Q>::store_r2c_reduced(thread_data, &output_values[mem_offsets.physical_x_output * threadIdx.y], gridDim.y, mem_offsets.physical_x_output);
 }
 
 template <class ExternalImage_t, class FFT, class invFFT, int Q, class ComplexData_t>
@@ -1200,12 +1225,12 @@ __global__ void block_fft_kernel_C2C_FWD_NONE_INV_DECREASE_ConjMul(const Externa
     complex_compute_t thread_data[FFT::storage_size];
 
     // Load in natural order
-    io<FFT>::load(&input_values[Return1DFFTAddress(size_of<FFT>::value)], thread_data);
+    io<FFT, Q>::load(&input_values[Return1DFFTAddress(size_of<FFT>::value)], thread_data);
 
-    // io<FFT>::load_c2c_shared_and_pad(&input_values[Return1DFFTAddress(mem_offsets.physical_x_input)], shared_mem);
+    // io<FFT,Q>::load_c2c_shared_and_pad(&input_values[Return1DFFTAddress(mem_offsets.physical_x_input)], shared_mem);
 
     // // DIT shuffle, bank conflict free
-    // io<FFT>::copy_from_shared(shared_mem, thread_data, Q);
+    //io<FFT, Q>::copy_from_shared_strided_Q(shared_mem, thread_data);
 
     // constexpr const unsigned int fft_shared_mem_num_elements = FFT::shared_memory_size / sizeof(complex_compute_t);
     // FFT().execute(thread_data, &shared_mem[fft_shared_mem_num_elements * threadIdx.y], workspace_fwd);
@@ -1213,12 +1238,12 @@ __global__ void block_fft_kernel_C2C_FWD_NONE_INV_DECREASE_ConjMul(const Externa
     FFT( ).execute(thread_data, shared_mem, workspace_fwd);
 
     // // Full twiddle multiply and store in natural order in shared memory
-    // io<FFT>::reduce_block_fft(thread_data, shared_mem, _i2pi_P<FFT>()*Q, Q);
+    // io<FFT, Q>::reduce_block_fft(thread_data, shared_mem, _i2pi_P<FFT>()*Q);
 
 #if FFT_DEBUG_STAGE > 3
     // Load in imageFFT to search
-    io<invFFT>::load_shared_and_conj_multiply(&image_to_search[Return1DFFTAddress(size_of<FFT>::value)],
-                                              thread_data);
+    io<invFFT, Q>::load_shared_and_conj_multiply(&image_to_search[Return1DFFTAddress(size_of<FFT>::value)],
+                                                 thread_data);
 #endif
 
 #if FFT_DEBUG_STAGE > 4
@@ -1229,14 +1254,14 @@ __global__ void block_fft_kernel_C2C_FWD_NONE_INV_DECREASE_ConjMul(const Externa
 #endif
 
 // // The reduced store considers threadIdx.y to ignore extra threads
-// io<invFFT>::store_c2c_reduced(thread_data, &output_values[blockIdx.y * gridDim.y]);
+// io<invFFT,Q>::store_c2c_reduced(thread_data, &output_values[blockIdx.y * gridDim.y]);
 #if FFT_DEBUG_STAGE < 5
     // There is no size reduction for this debug stage, so we need to use the pixel_pitch of the input array.
-    io<invFFT>::store(thread_data, &output_values[Return1DFFTAddress(size_of<FFT>::value)]);
+    io<invFFT, Q>::store(thread_data, &output_values[Return1DFFTAddress(size_of<FFT>::value)]);
 #else
     // In the current simplified version of the kernel, I am not using any transform decomposition (this is because of the difficulties with resrved threadIdx.x/y in the cufftdx lib)
     // So the full thing is calculated and only truncated on output.
-    io<invFFT>::store(thread_data, &output_values[Return1DFFTAddress(size_of<FFT>::value / apparent_Q)], size_of<FFT>::value / apparent_Q);
+    io<invFFT, Q>::store(thread_data, &output_values[Return1DFFTAddress(size_of<FFT>::value / apparent_Q)], size_of<FFT>::value / apparent_Q);
 #endif
 }
 
@@ -1255,12 +1280,12 @@ __launch_bounds__(FFT::max_threads_per_block) __global__
     complex_compute_t thread_data[FFT::storage_size];
 
     // No need to __syncthreads as each thread only accesses its own shared mem anyway
-    io<FFT>::load(&input_values[Return1DFFTAddress(size_of<FFT>::value)], thread_data);
+    io<FFT, Q>::load(&input_values[Return1DFFTAddress(size_of<FFT>::value)], thread_data);
 
     // Since the memory ops are super straightforward this is an okay compromise.
     FFT( ).execute(thread_data, shared_mem, workspace);
 
-    io<FFT>::store(thread_data, &output_values[Return1DFFTAddress(size_of<FFT>::value)]);
+    io<FFT, Q>::store(thread_data, &output_values[Return1DFFTAddress(size_of<FFT>::value)]);
 }
 
 template <class FFT, int Q, class ComplexData_t>
@@ -1277,7 +1302,7 @@ __launch_bounds__(XZ_STRIDE* FFT::max_threads_per_block) __global__
     complex_compute_t thread_data[FFT::storage_size];
 
     // No need to __syncthreads as each thread only accesses its own shared mem anyway
-    io<FFT>::load(&input_values[Return1DFFTAddress_strided_Z(size_of<FFT>::value)], thread_data);
+    io<FFT, Q>::load(&input_values[Return1DFFTAddress_strided_Z(size_of<FFT>::value)], thread_data);
 
     FFT( ).execute(thread_data, &shared_mem[threadIdx.y * FFT::shared_memory_size / sizeof(complex_compute_t)], workspace);
     __syncthreads( );
@@ -1295,7 +1320,7 @@ __launch_bounds__(XZ_STRIDE* FFT::max_threads_per_block) __global__
     __syncthreads( );
 
     // Transpose XZ, so the proper Z dimension now comes from X
-    io<FFT>::store_transposed_xz_strided_Z(shared_mem, output_values);
+    io<FFT, Q>::store_transposed_xz_strided_Z(shared_mem, output_values);
 }
 
 // we don't know this because it is threadDim.x * threadDim.z - this could be templated if it affects performance significantly
@@ -1311,20 +1336,20 @@ __launch_bounds__(FFT::max_threads_per_block) __global__
     complex_compute_t thread_data[FFT::storage_size];
 
     // Load in natural order
-    io<FFT>::load_c2c_shared_and_pad(&input_values[Return1DFFTAddress(size_of<FFT>::value * Q)], shared_mem);
+    io<FFT, Q>::load_c2c_shared_and_pad(&input_values[Return1DFFTAddress(size_of<FFT>::value * Q)], shared_mem);
 
     // DIT shuffle, bank conflict free
-    io<FFT>::copy_from_shared(shared_mem, thread_data, Q);
+    io<FFT, Q>::copy_from_shared_strided_Q(shared_mem, thread_data);
 
     constexpr const unsigned int fft_shared_mem_num_elements = FFT::shared_memory_size / sizeof(complex_compute_t);
     FFT( ).execute(thread_data, &shared_mem[fft_shared_mem_num_elements * threadIdx.y], workspace);
     __syncthreads( );
 
     // Full twiddle multiply and store in natural order in shared memory
-    io<FFT>::reduce_block_fft(thread_data, shared_mem, Q);
+    io<FFT, Q>::reduce_block_fft(thread_data, shared_mem);
 
     // Reduce from shared memory into registers, ending up with only P valid outputs.
-    io<FFT>::store_c2c_reduced(thread_data, &output_values[Return1DFFTAddress(size_of<FFT>::value)]);
+    io<FFT, Q>::store_c2c_reduced(thread_data, &output_values[Return1DFFTAddress(size_of<FFT>::value)]);
 }
 
 // we don't know this because it is threadDim.x * threadDim.z - this could be templated if it affects performance significantly
@@ -1344,26 +1369,28 @@ __launch_bounds__(FFT::max_threads_per_block) __global__
     complex_compute_t thread_data[FFT::storage_size];
 
     // No need to __syncthreads as each thread only accesses its own shared mem anyway
-    io<FFT>::load_shared(&input_values[Return1DFFTAddress(size_of<FFT>::value)],
-                         shared_input_complex,
-                         thread_data);
+    io<FFT, Q>::load_shared(&input_values[Return1DFFTAddress(size_of<FFT>::value)],
+                            shared_input_complex,
+                            thread_data);
 
     FFT( ).execute(thread_data, shared_mem, workspace);
-    io<FFT>::store(thread_data, shared_output, Q, 0);
+    io<FFT, Q>::store(thread_data, shared_output, Q, 0);
 
     // For the other fragments we need the initial twiddle
     for ( unsigned int sub_fft = 1; sub_fft < Q; sub_fft++ ) {
         // FIXME: make sure this load is efficient
-        io<FFT>::copy_from_shared_and_twiddle(shared_input_complex, thread_data, sub_fft);
+        io<FFT, Q>::copy_from_shared_and_twiddle(shared_input_complex, thread_data, sub_fft);
         FFT( ).execute(thread_data, shared_mem, workspace);
-        io<FFT>::store(thread_data, shared_output, Q, sub_fft);
+        io<FFT, Q>::store(thread_data, shared_output, Q, sub_fft);
     }
     __syncthreads( );
 
     // Now that the memory output can be coalesced send to global
     // FIXME: is this actually coalced?
     for ( int sub_fft = 0; sub_fft < Q; sub_fft++ ) {
-        io<FFT>::store_coalesced(shared_output, &output_values[Return1DFFTAddress(size_of<FFT>::value * Q)], sub_fft * mem_offsets.shared_input);
+        io<FFT, Q>::store_coalesced(shared_output,
+                                    &output_values[Return1DFFTAddress(size_of<FFT>::value * Q)],
+                                    sub_fft * mem_offsets.shared_input);
     }
 }
 
@@ -1381,14 +1408,14 @@ __launch_bounds__(XZ_STRIDE* FFT::max_threads_per_block) __global__
     complex_compute_t thread_data[FFT::storage_size];
 
     // No need to __syncthreads as each thread only accesses its own shared mem anyway
-    io<FFT>::load(&input_values[Return1DFFTColumn_XYZ_transpose(size_of<FFT>::value)], thread_data);
+    io<FFT, Q>::load(&input_values[Return1DFFTColumn_XYZ_transpose(size_of<FFT>::value)], thread_data);
 
     FFT( ).execute(thread_data, &shared_mem[threadIdx.y * FFT::shared_memory_size / sizeof(complex_compute_t)], workspace);
     __syncthreads( );
 
-    io<FFT>::transpose_in_shared_XZ(shared_mem, thread_data);
+    io<FFT, Q>::transpose_in_shared_XZ(shared_mem, thread_data);
 
-    io<FFT>::store_Z(shared_mem, output_values);
+    io<FFT, Q>::store_Z(shared_mem, output_values);
 }
 
 template <class FFT, int Q, class ComplexData_t>
@@ -1403,33 +1430,33 @@ __launch_bounds__(XZ_STRIDE* FFT::max_threads_per_block) __global__
 
     // Memory used by FFT
     complex_compute_t thread_data[FFT::storage_size];
-    complex_compute_t twiddle;
-    float             twiddle_factor_args[FFT::storage_size];
 
     // No need to __syncthreads as each thread only accesses its own shared mem anyway
-    io<FFT>::load_shared(&input_values[Return1DFFTColumn_XYZ_transpose(size_of<FFT>::value)],
-                         &shared_input_complex[threadIdx.y * mem_offsets.shared_input],
-                         thread_data,
-                         twiddle_factor_args);
+    io<FFT, Q>::load_shared(&input_values[Return1DFFTColumn_XYZ_transpose(size_of<FFT>::value)],
+                            &shared_input_complex[threadIdx.y * mem_offsets.shared_input],
+                            thread_data);
 
     FFT( ).execute(thread_data, &shared_mem[threadIdx.y * FFT::shared_memory_size / sizeof(complex_compute_t)], workspace);
     __syncthreads( );
 
-    io<FFT>::transpose_in_shared_XZ(shared_mem, thread_data);
-    io<FFT>::store_Z(shared_mem, output_values, Q, 0);
+    io<FFT, Q>::transpose_in_shared_XZ(shared_mem, thread_data);
+    io<FFT, Q>::store_Z(shared_mem, output_values, Q, 0);
 
     // For the other fragments we need the initial twiddle
     for ( int sub_fft = 1; sub_fft < Q; sub_fft++ ) {
-        io<FFT>::copy_from_shared(&shared_input_complex[threadIdx.y * mem_offsets.shared_input],
-                                  thread_data);
-        for ( int i = 0; i < FFT::elements_per_thread; i++ ) {
-            // Pre shift with twiddle
-            SINCOS(twiddle_factor_args[i] * sub_fft, &twiddle.y, &twiddle.x);
-            thread_data[i] *= twiddle;
-        }
-        FFT( ).execute(thread_data, &shared_mem[threadIdx.y * FFT::shared_memory_size / sizeof(complex_compute_t)], workspace);
-        io<FFT>::transpose_in_shared_XZ(shared_mem, thread_data);
-        io<FFT>::store_Z(shared_mem, output_values, Q, sub_fft);
+        io<FFT, Q>::copy_from_shared_and_twiddle(&shared_input_complex[threadIdx.y * mem_offsets.shared_input],
+                                                 thread_data,
+                                                 sub_fft);
+
+        FFT( ).execute(thread_data,
+                       &shared_mem[threadIdx.y * FFT::shared_memory_size / sizeof(complex_compute_t)],
+                       workspace);
+        io<FFT, Q>::transpose_in_shared_XZ(shared_mem,
+                                           thread_data);
+        io<FFT, Q>::store_Z(shared_mem,
+                            output_values,
+                            Q,
+                            sub_fft);
     }
 }
 
@@ -1444,12 +1471,12 @@ __launch_bounds__(FFT::max_threads_per_block) __global__
 
     complex_compute_t thread_data[FFT::storage_size];
 
-    io<FFT>::load_c2r(&input_values[Return1DFFTAddress(mem_offsets.physical_x_input)], thread_data);
+    io<FFT, Q>::load_c2r(&input_values[Return1DFFTAddress(mem_offsets.physical_x_input)], thread_data);
 
     // For loop zero the twiddles don't need to be computed
     FFT( ).execute(thread_data, shared_mem, workspace);
 
-    io<FFT>::store_c2r(thread_data, &output_values[Return1DFFTAddress(mem_offsets.physical_x_output)]);
+    io<FFT, Q>::store_c2r(thread_data, &output_values[Return1DFFTAddress(mem_offsets.physical_x_output)]);
 }
 
 template <class FFT, int Q, class InputData_t, class OutputData_t>
@@ -1463,12 +1490,12 @@ __launch_bounds__(FFT::max_threads_per_block) __global__
 
     complex_compute_t thread_data[FFT::storage_size];
 
-    io<FFT>::load_c2r_transposed(&input_values[ReturnZplane(gridDim.y, mem_offsets.physical_x_input)], thread_data, gridDim.y);
+    io<FFT, Q>::load_c2r_transposed(&input_values[ReturnZplane(gridDim.y, mem_offsets.physical_x_input)], thread_data, gridDim.y);
 
     // For loop zero the twiddles don't need to be computed
     FFT( ).execute(thread_data, shared_mem, workspace);
 
-    io<FFT>::store_c2r(thread_data, &output_values[Return1DFFTAddress(mem_offsets.physical_x_output)]);
+    io<FFT, Q>::store_c2r(thread_data, &output_values[Return1DFFTAddress(mem_offsets.physical_x_output)]);
 }
 
 template <class FFT, int Q, class InputData_t, class OutputData_t>
@@ -1481,12 +1508,12 @@ __global__ void block_fft_kernel_C2R_DECREASE_XY(const InputData_t* __restrict__
 
     complex_compute_t thread_data[FFT::storage_size];
 
-    io<FFT>::load_c2r_transposed(&input_values[ReturnZplane(gridDim.y, mem_offsets.physical_x_input)], thread_data, gridDim.y);
+    io<FFT, Q>::load_c2r_transposed(&input_values[ReturnZplane(gridDim.y, mem_offsets.physical_x_input)], thread_data, gridDim.y);
 
     // For loop zero the twiddles don't need to be computed
     FFT( ).execute(thread_data, shared_mem, workspace);
 
-    io<FFT>::store_c2r(thread_data, &output_values[Return1DFFTAddress(mem_offsets.physical_x_output)]);
+    io<FFT, Q>::store_c2r(thread_data, &output_values[Return1DFFTAddress(mem_offsets.physical_x_output)]);
 }
 
 // FIXME assumed FWD
@@ -1623,13 +1650,13 @@ void FourierTransformer<ComputeBaseType, InputType, OtherImageType, Rank>::SetIn
 
     if constexpr ( detail::has_any_block_operator<FFT_base>::value ) {
         if constexpr ( Rank == 3 ) {
-            SelectQValues<FFT_ALGO_t, FFT_base, PreOpType, IntraOpType, PostOpType, 1, 2, 4, 8, 16, 32>(other_image_ptr, kernel_type, pre_op_functor, intra_op_functor, post_op_functor);
+            SelectQValues<FFT_ALGO_t, FFT_base, PreOpType, IntraOpType, PostOpType, FastFFT_allowed_Q_values_3D>(other_image_ptr, kernel_type, pre_op_functor, intra_op_functor, post_op_functor);
         }
         else {
             // TODO: 8192 will fail for sm75 if wanted need some extra logic ... , 8192, 16
             // SelectQValues<FFT_ALGO_t, FFT_base, PreOpType, IntraOpType, PostOpType, 1, 2, 4, 16, 32, 64, 128, 256, 512>(other_image_ptr, kernel_type, pre_op_functor, intra_op_functor, post_op_functor);
             // 1, 2, 4, 16, 32
-            SelectQValues<FFT_ALGO_t, FFT_base, PreOpType, IntraOpType, PostOpType, 1, 2, 4, 8, 16, 32, 64>(other_image_ptr, kernel_type, pre_op_functor, intra_op_functor, post_op_functor);
+            SelectQValues<FFT_ALGO_t, FFT_base, PreOpType, IntraOpType, PostOpType, FastFFT_allowed_Q_values_2D>(other_image_ptr, kernel_type, pre_op_functor, intra_op_functor, post_op_functor);
         }
     }
     else {
@@ -1653,22 +1680,22 @@ void FourierTransformer<ComputeBaseType, InputType, OtherImageType, Rank>::Selec
 
     if ( transform_size.Q == QValue ) {
         if constexpr ( Rank == 3 ) {
-            SelectSizeAndType<FFT_ALGO_t, QValue, FFT_base, PreOpType, IntraOpType, PostOpType, 16, 32, 64, 128, 256, 512>(other_image_ptr, kernel_type, pre_op_functor, intra_op_functor, post_op_functor);
+            SelectSizeAndType<FFT_ALGO_t, QValue, FFT_base, PreOpType, IntraOpType, PostOpType, FastFFT_allowed_FFT_sizes_3D>(other_image_ptr, kernel_type, pre_op_functor, intra_op_functor, post_op_functor);
         }
         else {
             // TODO: Need a better way to calculate this on the fly
             if constexpr ( QValue <= 8 ) {
                 // TODO: 8192 will fail for sm75 if wanted need some extra logic ... , 8192, 16
-                SelectSizeAndType<FFT_ALGO_t, QValue, FFT_base, PreOpType, IntraOpType, PostOpType, 64, 128, 256, 512, 1024, 2048, 4096>(other_image_ptr, kernel_type, pre_op_functor, intra_op_functor, post_op_functor);
+                SelectSizeAndType<FFT_ALGO_t, QValue, FFT_base, PreOpType, IntraOpType, PostOpType, FastFFT_allowed_FFT_sizes_2D_lte08>(other_image_ptr, kernel_type, pre_op_functor, intra_op_functor, post_op_functor);
             }
             else if constexpr ( QValue <= 16 ) {
-                SelectSizeAndType<FFT_ALGO_t, QValue, FFT_base, PreOpType, IntraOpType, PostOpType, 64, 128, 256, 1024, 2048, 4096>(other_image_ptr, kernel_type, pre_op_functor, intra_op_functor, post_op_functor);
+                SelectSizeAndType<FFT_ALGO_t, QValue, FFT_base, PreOpType, IntraOpType, PostOpType, FastFFT_allowed_FFT_sizes_2D_lte16>(other_image_ptr, kernel_type, pre_op_functor, intra_op_functor, post_op_functor);
             }
             else if constexpr ( QValue <= 32 ) {
-                SelectSizeAndType<FFT_ALGO_t, QValue, FFT_base, PreOpType, IntraOpType, PostOpType, 64, 128, 2048, 4096>(other_image_ptr, kernel_type, pre_op_functor, intra_op_functor, post_op_functor);
+                SelectSizeAndType<FFT_ALGO_t, QValue, FFT_base, PreOpType, IntraOpType, PostOpType, FastFFT_allowed_FFT_sizes_2D_lte32>(other_image_ptr, kernel_type, pre_op_functor, intra_op_functor, post_op_functor);
             }
             else if constexpr ( QValue <= 64 ) {
-                SelectSizeAndType<FFT_ALGO_t, QValue, FFT_base, PreOpType, IntraOpType, PostOpType, 64, 4096>(other_image_ptr, kernel_type, pre_op_functor, intra_op_functor, post_op_functor);
+                SelectSizeAndType<FFT_ALGO_t, QValue, FFT_base, PreOpType, IntraOpType, PostOpType, FastFFT_allowed_FFT_sizes_2D_lte64>(other_image_ptr, kernel_type, pre_op_functor, intra_op_functor, post_op_functor);
             }
         }
     }
@@ -1789,6 +1816,8 @@ void FourierTransformer<ComputeBaseType, InputType, OtherImageType, Rank>::SetAn
     using data_io_t = std::remove_pointer_t<decltype(d_ptr.external_input)>;
     // Could match data_io_t, but need not, will be converted in kernels to match complex_compute_t as needed.
     using external_image_t = OtherImageType;
+
+    IsSizeOrSubFFTSizeIncludedInBuild( ); // We try to catch this at compile time, but particularly for incorrect Q we can get silent erros, so we check here to avoid headaches in debugging.
 
     // If the user passed in a different exerternal pointer for the image, set it here, and if not,
     // we just alias the external input

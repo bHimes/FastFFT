@@ -146,6 +146,28 @@ inline void PrintVectorType(short4 input) {
     std::cerr << "(x,y,z,w) " << input.x << " " << input.y << " " << input.z << " " << input.w << std::endl;
 }
 
+// A clunky way to make sure we break at compile time if the defined set of sizes are not powers of 2.
+// TODO: also need range checks. (This method is not correct for n=0)
+constexpr bool check_pow2(int n) {
+    return n == 1 ? true : n % 2 == 0 ? check_pow2(n / 2)
+                                      : false;
+}
+
+template <bool T, unsigned int n>
+EnableIf<T> show_breaking_value_in_template_error_message( ) {
+    return;
+}
+
+template <unsigned int n>
+void check_pow2_func( ) {
+    show_breaking_value_in_template_error_message<check_pow2(n), n>( );
+}
+
+template <unsigned int... SizeValues>
+void CheckInputSizeMacroForPowerOfTwo( ) {
+    (check_pow2_func<SizeValues>( ), ...);
+}
+
 } // namespace FastFFT
 
 #endif

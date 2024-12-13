@@ -8,17 +8,17 @@
 
 namespace FastFFT {
 // Input size vectors to be tested.
-std::vector<int> test_size = {64, 128, 256, 512, 1024, 2048, 4096};
+std::vector<int> test_size = {FastFFT_allowed_FFT_sizes_2D_lte08};
 
 // std::vector<int> test_size_rectangle = {64, 128, 256, 512, 1024, 2048, 4096};
-std::vector<int> test_size_rectangle = {64, 128, 256, 512, 1024, 2048, 4096};
+std::vector<int> test_size_rectangle = {FastFFT_allowed_FFT_sizes_2D_lte08};
 
-std::vector<int> test_size_3d = {64, 128, 256, 512};
+std::vector<int> test_size_3d = {FastFFT_allowed_FFT_sizes_3D};
 // std::vector<int> test_size_3d ={512};
 
 // The launch parameters fail for 4096 -> < 64 for r2c_decrease_XY, not sure if it is the elements_per_thread or something else.
 // For now, just over-ride these small sizes
-std::vector<int> test_size_for_decrease = {64, 128, 256, 512, 1024, 2048, 4096};
+std::vector<int> test_size_for_decrease = {FastFFT_allowed_FFT_sizes_2D_lte08};
 
 void CheckInputArgs(int argc, char** argv, const std::string_view& text_line, bool& run_2d_unit_tests, bool& run_3d_unit_tests) {
     switch ( argc ) {

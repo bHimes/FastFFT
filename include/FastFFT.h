@@ -15,6 +15,31 @@
 // Inv 5, 6, 7 ( original y, z, x)
 // Defined in make by setting environmental variable  FFT_DEBUG_STAGE
 
+// While we try to avoid defines, in order to conveniently set allowed values for Q and FFT sizes, we use them here.
+// The permutations over these  values greatly expand the number of instantiations, so for debugging
+// it can be usefule to just allow a limited set (depending on the tests being run)
+// #define LIMIT_FOR_DEBUG
+#ifdef LIMIT_FOR_DEBUG
+
+#define FastFFT_allowed_Q_values_2D 1, 2
+#define FastFFT_allowed_FFT_sizes_2D_lte08 32, 64
+#define FastFFT_allowed_FFT_sizes_2D_lte16 32, 64
+#define FastFFT_allowed_FFT_sizes_2D_lte32 32, 64
+#define FastFFT_allowed_FFT_sizes_2D_lte64 32, 64
+
+#define FastFFT_allowed_Q_values_3D 1, 2, 4, 8, 16, 32
+#define FastFFT_allowed_FFT_sizes_3D 16, 32, 64, 128, 256, 512
+#else
+#define FastFFT_allowed_Q_values_2D 1, 2, 4, 8, 16, 32, 64
+#define FastFFT_allowed_FFT_sizes_2D_lte08 64, 128, 256, 512, 1024, 2048, 4096
+#define FastFFT_allowed_FFT_sizes_2D_lte16 64, 128, 256, 1024, 2048, 4096
+#define FastFFT_allowed_FFT_sizes_2D_lte32 64, 128, 2048, 4096
+#define FastFFT_allowed_FFT_sizes_2D_lte64 64, 4096
+
+#define FastFFT_allowed_Q_values_3D 1, 2, 4, 8, 16, 32
+#define FastFFT_allowed_FFT_sizes_3D 64, 128, 256, 512
+#endif
+
 namespace FastFFT {
 
 // TODO: this may be expanded, for now it is to be used in the case where we have
@@ -688,6 +713,31 @@ class FourierTransformer {
             return false;
         else
             return true;
+    }
+
+    void IsSizeOrSubFFTSizeIncludedInBuild( ) {
+        // We are currently only checking that the sizes we have built wilth in the defines FastFFT_allowed_FFT_sizes_2D_lte08
+        // are a power of 2 at compile time. We also need to ensure we are not calling with a number outside that value, and also that
+        // we have built with the correct Q values. We check the latter when setting those, but lets make sure are sizes are okay.
+        std::initializer_list<int> check_for_built_size = {FastFFT_allowed_FFT_sizes_2D_lte08};
+        bool                       found_valid_size     = false;
+        for ( auto& val : my_checker ) {
+            if ( val == transform_size.N ) {
+                found_valid_size = true;
+                break;
+            }
+        }
+        MyFFTRunTimeAssertTrue(found_valid_size, "transform_size.N (%d) not in FastFFT_allowed_FFT_sizes_2D_lte08", transform_size.N);
+
+        std::initializer_list<int> check_for_built_Q = {FastFFT_allowed_Q_values_2D};
+        found_valid_size                             = false;
+        for ( auto& val : check_for_built_Q ) {
+            if ( val == transform_size.Q ) {
+                found_valid_size = true;
+                break;
+            }
+        }
+        MyFFTRunTimeAssertTrue(found_valid_size, "transform_size.Q (%d) not in FastFFT_allowed_Q_values_2D", transform_size.Q);
     }
 
     /**

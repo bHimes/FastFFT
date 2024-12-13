@@ -50,12 +50,12 @@ static __device__ __host__ inline auto ComplexMulAndScale(const ComplexType a, c
     static_assert(std::is_arithmetic_v<ScalarType>, "ScalarType must be an arithmetic type");
     ComplexType c;
     if constexpr ( std::is_same_v<ScalarType, float> ) {
-        c.x = s * __fmaf_ieee_rn(a.x * b.x, -a.y * b.y);
-        c.y = s * __fmaf_ieee_rn(a.y * b.x, +a.x * b.y);
+        c.x = s * __fmaf_ieee_rn(a.x, b.x, -a.y * b.y);
+        c.y = s * __fmaf_ieee_rn(a.y, b.x, +a.x * b.y);
     }
     else if constexpr ( std::is_same_v<ScalarType, __nv_bfloat16> || std::is_same_v<ScalarType, __half> ) {
-        c.x = s * __hfma(a.x * b.x, -a.y * b.y);
-        c.y = s * __hfma(a.y * b.x, +a.x * b.y);
+        c.x = s * __hfma(a.x, b.x, -a.y * b.y);
+        c.y = s * __hfma(a.y, b.x, +a.x * b.y);
     }
     else {
         static_non_complexmul_type( );
@@ -73,12 +73,12 @@ static __device__ __host__ inline auto ComplexConjMulAndScale(const ComplexType 
     static_assert(std::is_arithmetic_v<ScalarType>, "ScalarType must be an arithmetic type");
     ComplexType c;
     if constexpr ( std::is_same_v<ScalarType, float> ) {
-        c.x = s * __fmaf_ieee_rn(a.x * b.x, +a.y * b.y);
-        c.y = s * __fmaf_ieee_rn(a.y * b.x, -a.x * b.y);
+        c.x = s * __fmaf_ieee_rn(a.x, b.x, +a.y * b.y);
+        c.y = s * __fmaf_ieee_rn(a.y, b.x, -a.x * b.y);
     }
     else if constexpr ( std::is_same_v<ScalarType, __nv_bfloat16> || std::is_same_v<ScalarType, __half> ) {
-        c.x = s * __hfma(a.x * b.x, +a.y * b.y);
-        c.y = s * __hfma(a.y * b.x, -a.x * b.y);
+        c.x = s * __hfma(a.x, b.x, +a.y * b.y);
+        c.y = s * __hfma(a.y, b.x, -a.x * b.y);
     }
     else {
         static_non_complexmul_type( );
