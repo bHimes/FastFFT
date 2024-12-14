@@ -23,11 +23,10 @@ typedef struct __align__(8) _Offsets {
 Offsets;
 
 typedef struct __align__(64) _LaunchParams {
-    int     Q;
-    float   twiddle_in;
-    dim3    gridDims;
-    dim3    threadsPerBlock;
-    Offsets mem_offsets;
+    int     Q; // sizeof(int) = 4
+    dim3    gridDims; // sizeof(unsigned int) * 3 = 12
+    dim3    threadsPerBlock; // sizeof(unsigned int) * 3 = 12
+    Offsets mem_offsets; // sizeof(unsigned short int) * 4 = 8
 }
 
 LaunchParams;
