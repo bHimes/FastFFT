@@ -67,7 +67,18 @@
       "streambuf": "cpp",
       "thread": "cpp",
       "typeinfo": "cpp",
-      "__config": "cpp"
+      "__config": "cpp",
+      "bit": "cpp",
+      "__nullptr": "cpp",
+      "__bit_reference": "cpp",
+      "__functional_base": "cpp",
+      "__node_handle": "cpp",
+      "__memory": "cpp",
+      "locale": "cpp",
+      "__functional_base_03": "cpp",
+      "__hash_table": "cpp",
+      "__tree": "cpp",
+      "compare": "cpp"
     }
   }
 }

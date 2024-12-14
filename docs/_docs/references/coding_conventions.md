@@ -36,7 +36,6 @@ Defined in src/FastFFT.h
 
 ### Device properties
 
-
 ```c++
   typedef
   struct __align__(32) _DeviceProps {
@@ -73,7 +72,7 @@ These are passed to every kernel and the meanings are
 
 ```c++
   typedef
-	struct __align__(8) _Offsets{
+ struct __align__(8) _Offsets{
     unsigned short shared_input;
     unsigned short shared_output;
     unsigned short physical_x_input;
@@ -83,15 +82,12 @@ These are passed to every kernel and the meanings are
 
 ### Launch parameters
 
-
 ```c++
   typedef 
   struct __align__(64) _LaunchParams{
     int Q;
-    float twiddle_in;
     dim3 gridDims;
     dim3 threadsPerBlock;
     Offsets mem_offsets;
   } LaunchParams;
 ```
-
