@@ -245,11 +245,13 @@ int main(int argc, char** argv) {
         //     return 1;
     }
 
+#ifdef FastFFT_3d_instantiation
     if ( run_3d_unit_tests ) {
         // if ( ! const_image_test<3, false>(FastFFT::test_size_3d) )
         //     return 1;
         // if (! unit_impulse_test(test_size_3d, true, true)) return 1;
     }
+#endif
 
     return 0;
 };

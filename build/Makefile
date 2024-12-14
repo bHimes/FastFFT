@@ -4,14 +4,14 @@ NVCC=nvcc
 NVCC_FLAGS=-ccbin=g++ -t 8 
 # TODO: static may need to be added later or independently just for benchmarks, while libs to link through python are probably going to need to be dynamic. --split-compile=8
 NVCC_FLAGS+=--cudart=static
-NVCC_FLAGS+=--default-stream per-thread -m64 -O3 --use_fast_math --extra-device-vectorization --extended-lambda --Wext-lambda-captures-this -std=c++17 -Xptxas --warn-on-local-memory-usage,--warn-on-spills, --generate-line-info -Xcompiler=-std=c++17
+NVCC_FLAGS+=--default-stream per-thread -m64 -O3 --use_fast_math --extra-device-vectorization --extended-lambda --Wext-lambda-captures-this -std=c++17 -Xptxas --warn-on-local-memory-usage,--warn-on-spills,--warn-on-double-precision-use --generate-line-info -Xcompiler=-std=c++17
 # Experimental flag to allow relaxed constexpr host call in device code
 NVCC_FLAGS+=--expt-relaxed-constexpr
 # For testing, particularly until the cufftdx::BlockDim() operator is enabled
 NVCC_FLAGS+=-DCUFFTDX_DISABLE_RUNTIME_ASSERTS
 
 # Don't explicitly instantiate the 3d versions unless requested
-NVCC_FLAGS+=-DFastFFT_3d_instantiation
+# NVCC_FLAGS+=-DFastFFT_3d_instantiation
 NVCC_FLAGS+=-DCUFFTDX_DISABLE_CUTLASS_DEPENDENCY
 
 # Gencode arguments, only supporting Volta or newer

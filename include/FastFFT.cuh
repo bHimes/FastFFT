@@ -63,16 +63,31 @@ __launch_bounds__(XZ_STRIDE* FFT::max_threads_per_block) __global__
 
 template <class FFT, class InputData_t, class OutputData_t>
 __launch_bounds__(FFT::max_threads_per_block) __global__
-        void block_fft_kernel_R2C_INCREASE_XY(const InputData_t* __restrict__ input_values, OutputData_t* __restrict__ output_values, Offsets mem_offsets, int Q, typename FFT::workspace_type workspace);
+        void block_fft_kernel_R2C_INCREASE_XY(const InputData_t* __restrict__ input_values,
+                                              OutputData_t* __restrict__ output_values,
+                                              Offsets                              mem_offsets,
+                                              const __grid_constant__ unsigned int Q,
+                                              const __grid_constant__ float        twiddle_in,
+                                              typename FFT::workspace_type         workspace);
 
 // XZ_STRIDE ffts/block via threadIdx.x, notice launch bounds. Creates partial coalescing.
 template <class FFT, class InputData_t, class OutputData_t>
 __launch_bounds__(XZ_STRIDE* FFT::max_threads_per_block) __global__
-        void block_fft_kernel_R2C_INCREASE_XZ(const InputData_t* __restrict__ input_values, OutputData_t* __restrict__ output_values, Offsets mem_offsets, int Q, typename FFT::workspace_type workspace);
+        void block_fft_kernel_R2C_INCREASE_XZ(const InputData_t* __restrict__ input_values,
+                                              OutputData_t* __restrict__ output_values,
+                                              Offsets                              mem_offsets,
+                                              const __grid_constant__ unsigned int Q,
+                                              const __grid_constant__ float        twiddle_in,
+                                              typename FFT::workspace_type         workspace);
 
 // __launch_bounds__(FFT::max_threads_per_block)  we don't know this because it is threadDim.x * threadDim.z - this could be templated if it affects performance significantly
 template <class FFT, class InputData_t, class OutputData_t>
-__global__ void block_fft_kernel_R2C_DECREASE_XY(const InputData_t* __restrict__ input_values, OutputData_t* __restrict__ output_values, Offsets mem_offsets, int Q, typename FFT::workspace_type workspace);
+__global__ void block_fft_kernel_R2C_DECREASE_XY(const InputData_t* __restrict__ input_values,
+                                                 OutputData_t* __restrict__ output_values,
+                                                 Offsets                       mem_offsets,
+                                                 const __grid_constant__ int   Q,
+                                                 const __grid_constant__ float twiddle_in,
+                                                 typename FFT::workspace_type  workspace);
 
 /////////////
 // C2C
@@ -80,11 +95,21 @@ __global__ void block_fft_kernel_R2C_DECREASE_XY(const InputData_t* __restrict__
 
 template <class FFT, class ComplexData_t>
 __launch_bounds__(FFT::max_threads_per_block) __global__
-        void block_fft_kernel_C2C_INCREASE(const ComplexData_t* __restrict__ input_values, ComplexData_t* __restrict__ output_values, Offsets mem_offsets, int Q, typename FFT::workspace_type workspace);
+        void block_fft_kernel_C2C_INCREASE(const ComplexData_t* __restrict__ input_values,
+                                           ComplexData_t* __restrict__ output_values,
+                                           Offsets                              mem_offsets,
+                                           const __grid_constant__ unsigned int Q,
+                                           const __grid_constant__ float        twiddle_in,
+                                           typename FFT::workspace_type         workspace);
 
 // __launch_bounds__(FFT::max_threads_per_block)  we don't know this because it is threadDim.x * threadDim.z - this could be templated if it affects performance significantly
 template <class FFT, class ComplexData_t>
-__global__ void block_fft_kernel_C2C_DECREASE(const ComplexData_t* __restrict__ input_values, ComplexData_t* __restrict__ output_values, Offsets mem_offsets, int Q, typename FFT::workspace_type workspace);
+__global__ void block_fft_kernel_C2C_DECREASE(const ComplexData_t* __restrict__ input_values,
+                                              ComplexData_t* __restrict__ output_values,
+                                              Offsets                       mem_offsets,
+                                              const __grid_constant__ int   Q,
+                                              const __grid_constant__ float twiddle_in,
+                                              typename FFT::workspace_type  workspace);
 
 template <class FFT, class ComplexData_t>
 __launch_bounds__(FFT::max_threads_per_block) __global__
@@ -326,13 +351,14 @@ struct io {
                                               float* __restrict__ twiddle_factor_args,
                                               int* input_map,
                                               int* __restrict__ output_map,
-                                              int Q) {
+                                              const unsigned int Q,
+                                              const float        twiddle_in) {
         const unsigned int stride = stride_size( );
         unsigned int       index  = threadIdx.x;
         for ( unsigned int i = 0; i < FFT::elements_per_thread; i++ ) {
             input_map[i]           = index;
             output_map[i]          = Q * index;
-            twiddle_factor_args[i] = exp_i2pi_P<FFT>( ) * output_map[i];
+            twiddle_factor_args[i] = twiddle_in * output_map[i];
             thread_data[i]         = input[index];
             shared_input[index]    = thread_data[i];
             index += stride;
@@ -346,11 +372,12 @@ struct io {
     static inline __device__ void load_shared(const data_io_t* __restrict__ input,
                                               complex_compute_t* __restrict__ shared_input,
                                               complex_compute_t* __restrict__ thread_data,
-                                              float* __restrict__ twiddle_factor_args) {
+                                              float* __restrict__ twiddle_factor_args,
+                                              const float twiddle_in) {
         const unsigned int stride = stride_size( );
         unsigned int       index  = threadIdx.x;
         for ( unsigned int i = 0; i < FFT::elements_per_thread; i++ ) {
-            twiddle_factor_args[i] = exp_i2pi_P<FFT>( ) * index; // assuming Q = 1, so P == N
+            twiddle_factor_args[i] = twiddle_in * index; // assuming Q = 1, so P == N
             thread_data[i]         = convert_if_needed<FFT, scalar_compute_t>(input, index);
             shared_input[index]    = thread_data[i];
             index += stride;
@@ -363,15 +390,16 @@ struct io {
                                               float* __restrict__ twiddle_factor_args,
                                               int* __restrict__ input_map,
                                               int* __restrict__ output_map,
-                                              int Q,
-                                              int number_of_elements) {
+                                              const unsigned int Q,
+                                              const float        twiddle_in,
+                                              int                number_of_elements) {
         const unsigned int stride = stride_size( );
         unsigned int       index  = threadIdx.x;
         for ( unsigned int i = 0; i < FFT::elements_per_thread; i++ ) {
             if ( index < number_of_elements ) {
                 input_map[i]           = index;
                 output_map[i]          = Q * index;
-                twiddle_factor_args[i] = exp_i2pi_P<FFT>( ) * output_map[i];
+                twiddle_factor_args[i] = twiddle_in * output_map[i];
                 thread_data[i]         = input[index];
                 shared_input[index]    = thread_data[i];
                 index += stride;
@@ -392,14 +420,15 @@ struct io {
                                                   float* __restrict__ twiddle_factor_args,
                                                   int* __restrict__ input_map,
                                                   int* __restrict__ output_map,
-                                                  int Q) {
+                                                  const unsigned int Q,
+                                                  const float        twiddle_in) {
         const unsigned int stride = stride_size( );
         unsigned int       index  = threadIdx.x;
         for ( unsigned int i = 0; i < FFT::elements_per_thread; i++ ) {
             // if (blockIdx.y == 0) ("blck %i index %i \n", Q*index, index);
             input_map[i]           = index;
             output_map[i]          = Q * index;
-            twiddle_factor_args[i] = exp_i2pi_P<FFT>( ) * output_map[i];
+            twiddle_factor_args[i] = twiddle_in * output_map[i];
             thread_data[i].x       = convert_if_needed<FFT, scalar_compute_t>(input, index);
             thread_data[i].y       = 0.0f;
             shared_input[index]    = thread_data[i].x;
@@ -414,11 +443,12 @@ struct io {
     static inline __device__ void load_r2c_shared(const data_io_t* __restrict__ input,
                                                   scalar_compute_t* __restrict__ shared_input,
                                                   complex_compute_t* __restrict__ thread_data,
-                                                  float* __restrict__ twiddle_factor_args) {
+                                                  float* __restrict__ twiddle_factor_args,
+                                                  const float twiddle_in) {
         const unsigned int stride = stride_size( );
         unsigned int       index  = threadIdx.x;
         for ( unsigned int i = 0; i < FFT::elements_per_thread; i++ ) {
-            twiddle_factor_args[i] = exp_i2pi_P<FFT>( ) * index; // assuming Q = 1, so P == N
+            twiddle_factor_args[i] = twiddle_in * index; // assuming Q = 1, so P == N
             thread_data[i].x       = convert_if_needed<FFT, scalar_compute_t>(input, index);
             thread_data[i].y       = 0.0f;
             shared_input[index]    = thread_data[i].x;

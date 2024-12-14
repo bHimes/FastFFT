@@ -47,7 +47,9 @@ __launch_bounds__(FFT::max_threads_per_block) __global__
 
 #if FFT_DEBUG_STAGE > 3
     //  * apparent_Q
-    io<invFFT>::load_shared(&image_to_search[Return1DFFTAddress(size_of<FFT>::value)], thread_data, intra_op_functor);
+    io<invFFT>::load_shared(&image_to_search[Return1DFFTAddress(size_of<FFT>::value)],
+                            thread_data,
+                            intra_op_functor);
 #endif
 
 #if FFT_DEBUG_STAGE > 4
@@ -1008,7 +1010,12 @@ __launch_bounds__(XZ_STRIDE* FFT::max_threads_per_block) __global__
 
 template <class FFT, class InputData_t, class OutputData_t>
 __launch_bounds__(FFT::max_threads_per_block) __global__
-        void block_fft_kernel_R2C_INCREASE_XY(const InputData_t* __restrict__ input_values, OutputData_t* __restrict__ output_values, Offsets mem_offsets, int Q, typename FFT::workspace_type workspace) {
+        void block_fft_kernel_R2C_INCREASE_XY(const InputData_t* __restrict__ input_values,
+                                              OutputData_t* __restrict__ output_values,
+                                              Offsets                              mem_offsets,
+                                              const __grid_constant__ unsigned int Q,
+                                              const __grid_constant__ float        twiddle_in,
+                                              typename FFT::workspace_type         workspace) {
     // Initialize the shared memory, assuming everyting matches the input data X size in
     using complex_compute_t = typename FFT::value_type;
     using scalar_compute_t  = typename complex_compute_t::value_type;
@@ -1029,7 +1036,14 @@ __launch_bounds__(FFT::max_threads_per_block) __global__
 
     // No need to __syncthreads as each thread only accesses its own shared mem anyway
     // multiply Q*fwd_dims_out.w because x maps to y in the output transposed FFT
-    io<FFT>::load_r2c_shared(&input_values[Return1DFFTAddress(mem_offsets.physical_x_input)], shared_input, thread_data, twiddle_factor_args, input_MAP, output_MAP, Q);
+    io<FFT>::load_r2c_shared(&input_values[Return1DFFTAddress(mem_offsets.physical_x_input)],
+                             shared_input,
+                             thread_data,
+                             twiddle_factor_args,
+                             input_MAP,
+                             output_MAP,
+                             Q,
+                             twiddle_in);
 
     // We unroll the first and last loops.
     // In the first FFT the modifying twiddle factor is 1 so the data are real
@@ -1069,7 +1083,12 @@ __launch_bounds__(FFT::max_threads_per_block) __global__
 
 template <class FFT, class InputData_t, class OutputData_t>
 __launch_bounds__(XZ_STRIDE* FFT::max_threads_per_block) __global__
-        void block_fft_kernel_R2C_INCREASE_XZ(const InputData_t* __restrict__ input_values, OutputData_t* __restrict__ output_values, Offsets mem_offsets, int Q, typename FFT::workspace_type workspace) {
+        void block_fft_kernel_R2C_INCREASE_XZ(const InputData_t* __restrict__ input_values,
+                                              OutputData_t* __restrict__ output_values,
+                                              Offsets                              mem_offsets,
+                                              const __grid_constant__ unsigned int Q,
+                                              const __grid_constant__ float        twiddle_in,
+                                              typename FFT::workspace_type         workspace) {
 
     // Initialize the shared memory, assuming everyting matches the input data X size in
     using complex_compute_t = typename FFT::value_type;
@@ -1089,7 +1108,9 @@ __launch_bounds__(XZ_STRIDE* FFT::max_threads_per_block) __global__
     // we add NXY
     io<FFT>::load_r2c_shared(&input_values[Return1DFFTAddress_strided_Z(mem_offsets.physical_x_input)],
                              &shared_input[threadIdx.y * mem_offsets.shared_input],
-                             thread_data, twiddle_factor_args);
+                             thread_data,
+                             twiddle_factor_args,
+                             twiddle_in);
 
     FFT( ).execute(thread_data, &shared_mem[threadIdx.y * FFT::shared_memory_size / sizeof(complex_compute_t)], workspace);
     __syncthreads( );
@@ -1133,7 +1154,12 @@ __launch_bounds__(XZ_STRIDE* FFT::max_threads_per_block) __global__
 
 // __launch_bounds__(FFT::max_threads_per_block)  we don't know this because it is threadDim.x * threadDim.z - this could be templated if it affects performance significantly
 template <class FFT, class InputData_t, class OutputData_t>
-__global__ void block_fft_kernel_R2C_DECREASE_XY(const InputData_t* __restrict__ input_values, OutputData_t* __restrict__ output_values, Offsets mem_offsets, int Q, typename FFT::workspace_type workspace) {
+__global__ void block_fft_kernel_R2C_DECREASE_XY(const InputData_t* __restrict__ input_values,
+                                                 OutputData_t* __restrict__ output_values,
+                                                 Offsets                       mem_offsets,
+                                                 const __grid_constant__ int   Q,
+                                                 const __grid_constant__ float twiddle_in,
+                                                 typename FFT::workspace_type  workspace) {
     // Initialize the shared memory, assuming everyting matches the input data X size in
     using complex_compute_t = typename FFT::value_type;
     using scalar_compute_t  = typename complex_compute_t::value_type;
@@ -1156,7 +1182,7 @@ __global__ void block_fft_kernel_R2C_DECREASE_XY(const InputData_t* __restrict__
     __syncthreads( );
 
     // Full twiddle multiply and store in natural order in shared memory
-    io<FFT>::reduce_block_fft(thread_data, shared_mem, exp_i2pi_P<FFT>( ) * float(Q), Q);
+    io<FFT>::reduce_block_fft(thread_data, shared_mem, twiddle_in * float(Q), Q);
 
     // Reduce from shared memory into registers, ending up with only P valid outputs.
     io<FFT>::store_r2c_reduced(thread_data, &output_values[mem_offsets.physical_x_output * threadIdx.y], gridDim.y, mem_offsets.physical_x_output);
@@ -1274,7 +1300,12 @@ __launch_bounds__(XZ_STRIDE* FFT::max_threads_per_block) __global__
 
 // __launch_bounds__(FFT::max_threads_per_block)  we don't know this because it is threadDim.x * threadDim.z - this could be templated if it affects performance significantly
 template <class FFT, class ComplexData_t>
-__global__ void block_fft_kernel_C2C_DECREASE(const ComplexData_t* __restrict__ input_values, ComplexData_t* __restrict__ output_values, Offsets mem_offsets, int Q, typename FFT::workspace_type workspace) {
+__global__ void block_fft_kernel_C2C_DECREASE(const ComplexData_t* __restrict__ input_values,
+                                              ComplexData_t* __restrict__ output_values,
+                                              Offsets                       mem_offsets,
+                                              const __grid_constant__ int   Q,
+                                              const __grid_constant__ float twiddle_in,
+                                              typename FFT::workspace_type  workspace) {
     //	// Initialize the shared memory, assuming everyting matches the input data X size in
     using complex_compute_t = typename FFT::value_type;
     using scalar_compute_t  = typename complex_compute_t::value_type;
@@ -1294,7 +1325,7 @@ __global__ void block_fft_kernel_C2C_DECREASE(const ComplexData_t* __restrict__ 
     __syncthreads( );
 
     // Full twiddle multiply and store in natural order in shared memory
-    io<FFT>::reduce_block_fft(thread_data, shared_mem, exp_i2pi_P<FFT>( ) * Q, Q);
+    io<FFT>::reduce_block_fft(thread_data, shared_mem, twiddle_in * Q, Q);
 
     // Reduce from shared memory into registers, ending up with only P valid outputs.
     io<FFT>::store_c2c_reduced(thread_data, &output_values[Return1DFFTAddress(size_of<FFT>::value)]);
@@ -1302,7 +1333,12 @@ __global__ void block_fft_kernel_C2C_DECREASE(const ComplexData_t* __restrict__ 
 
 // __launch_bounds__(FFT::max_threads_per_block)  we don't know this because it is threadDim.x * threadDim.z - this could be templated if it affects performance significantly
 template <class FFT, class ComplexData_t>
-__global__ void block_fft_kernel_C2C_INCREASE(const ComplexData_t* __restrict__ input_values, ComplexData_t* __restrict__ output_values, Offsets mem_offsets, int Q, typename FFT::workspace_type workspace) {
+__global__ void block_fft_kernel_C2C_INCREASE(const ComplexData_t* __restrict__ input_values,
+                                              ComplexData_t* __restrict__ output_values,
+                                              Offsets                              mem_offsets,
+                                              const __grid_constant__ unsigned int Q,
+                                              const __grid_constant__ float        twiddle_in,
+                                              typename FFT::workspace_type         workspace) {
     // Initialize the shared memory, assuming everyting matches the input data X size in
 
     using complex_compute_t = typename FFT::value_type;
@@ -1318,7 +1354,11 @@ __global__ void block_fft_kernel_C2C_INCREASE(const ComplexData_t* __restrict__ 
     complex_compute_t twiddle;
 
     // No need to __syncthreads as each thread only accesses its own shared mem anyway
-    io<FFT>::load_shared(&input_values[Return1DFFTAddress(size_of<FFT>::value)], shared_input_complex, thread_data, twiddle_factor_args);
+    io<FFT>::load_shared(&input_values[Return1DFFTAddress(size_of<FFT>::value)],
+                         shared_input_complex,
+                         thread_data,
+                         twiddle_factor_args,
+                         twiddle_in);
 
     FFT( ).execute(thread_data, shared_mem, workspace);
     io<FFT>::store(thread_data, shared_output, Q, 0);
@@ -1339,65 +1379,6 @@ __global__ void block_fft_kernel_C2C_INCREASE(const ComplexData_t* __restrict__ 
 
     // Now that the memory output can be coalesced send to global
     // FIXME: is this actually coalced?
-    for ( int sub_fft = 0; sub_fft < Q; sub_fft++ ) {
-        io<FFT>::store_coalesced(shared_output, &output_values[Return1DFFTAddress(size_of<FFT>::value * Q)], sub_fft * mem_offsets.shared_input);
-    }
-}
-
-template <class FFT, class InputData_t, class OutputData_t>
-__launch_bounds__(FFT::max_threads_per_block) __global__
-        void block_fft_kernel_C2C_INCREASE_SwapRealSpaceQuadrants(const InputData_t* __restrict__ input_values, OutputData_t* __restrict__ output_values, Offsets mem_offsets, int Q, typename FFT::workspace_type workspace) {
-
-    //	// Initialize the shared memory, assuming everyting matches the input data X size in
-    using complex_compute_t = typename FFT::value_type;
-    using scalar_compute_t  = typename complex_compute_t::value_type;
-
-    FastFFT_SMEM complex_compute_t shared_input_complex[]; // Storage for the input data that is re-used each blcok
-    complex_compute_t*             shared_output = (complex_compute_t*)&shared_input_complex[mem_offsets.shared_input]; // storage for the coalesced output data. This may grow too large,
-    complex_compute_t*             shared_mem    = (complex_compute_t*)&shared_output[mem_offsets.shared_output];
-
-    // Memory used by FFT
-    complex_compute_t twiddle;
-    complex_compute_t thread_data[FFT::storage_size];
-
-    // To re-map the thread index to the data
-    int input_MAP[FFT::storage_size];
-    // To re-map the decomposed frequency to the full output frequency
-    int output_MAP[FFT::storage_size];
-    // For a given decomposed fragment
-    float twiddle_factor_args[FFT::storage_size];
-
-    // No need to __syncthreads as each thread only accesses its own shared mem anyway
-    io<FFT>::load_shared(&input_values[Return1DFFTAddress(size_of<FFT>::value)], shared_input_complex, thread_data, twiddle_factor_args, input_MAP, output_MAP, Q);
-
-    // In the first FFT the modifying twiddle factor is 1 so the data are reeal
-    FFT( ).execute(thread_data, shared_mem, workspace);
-
-    // FIXME I have not confirmed on switch to physical_x_output that this represents the index of the first negative frequency in Y as it should.
-    io<FFT>::store_and_swap_quadrants(thread_data, shared_output, output_MAP, size_of<FFT>::value * Q);
-
-    // For the other fragments we need the initial twiddle
-    for ( int sub_fft = 1; sub_fft < Q; sub_fft++ ) {
-
-        io<FFT>::copy_from_shared(shared_input_complex, thread_data, input_MAP);
-
-        for ( int i = 0; i < FFT::elements_per_thread; i++ ) {
-            // Pre shift with twiddle
-            SINCOS(twiddle_factor_args[i] * sub_fft, &twiddle.y, &twiddle.x);
-            thread_data[i] *= twiddle;
-            // increment the output map. Note this only works for the leading non-zero case
-            output_MAP[i]++;
-        }
-
-        FFT( ).execute(thread_data, shared_mem, workspace);
-        io<FFT>::store_and_swap_quadrants(thread_data, shared_output, output_MAP, size_of<FFT>::value * Q);
-    }
-
-    // TODO confirm this is needed
-    __syncthreads( );
-
-    // Now that the memory output can be coalesced send to global
-    // FIXME is this actually coalced?
     for ( int sub_fft = 0; sub_fft < Q; sub_fft++ ) {
         io<FFT>::store_coalesced(shared_output, &output_values[Return1DFFTAddress(size_of<FFT>::value * Q)], sub_fft * mem_offsets.shared_input);
     }
@@ -1444,7 +1425,9 @@ __launch_bounds__(XZ_STRIDE* FFT::max_threads_per_block) __global__
 
     // No need to __syncthreads as each thread only accesses its own shared mem anyway
     io<FFT>::load_shared(&input_values[Return1DFFTColumn_XYZ_transpose(size_of<FFT>::value)],
-                         &shared_input_complex[threadIdx.y * mem_offsets.shared_input], thread_data, twiddle_factor_args);
+                         &shared_input_complex[threadIdx.y * mem_offsets.shared_input],
+                         thread_data,
+                         twiddle_factor_args);
 
     FFT( ).execute(thread_data, &shared_mem[threadIdx.y * FFT::shared_memory_size / sizeof(complex_compute_t)], workspace);
     __syncthreads( );
@@ -1943,7 +1926,7 @@ void FourierTransformer<ComputeBaseType, InputType, OtherImageType, Rank>::SetAn
                         MyFFTDebugAssertTrue(current_buffer == fastfft_external_input, "current_buffer != fastfft_external_input");
                         precheck;
                         block_fft_kernel_R2C_DECREASE_XY<FFT, data_io_t, data_buffer_t><<<LP.gridDims, LP.threadsPerBlock, shared_memory, cudaStreamPerThread>>>(
-                                d_ptr.external_input, reinterpret_cast<data_buffer_t*>(external_output_ptr), LP.mem_offsets, LP.Q, workspace);
+                                d_ptr.external_input, reinterpret_cast<data_buffer_t*>(external_output_ptr), LP.mem_offsets, LP.Q, exp_i2pi_P<FFT>( ), workspace);
                         postcheck;
                         current_buffer = aliased_output_buffer;
                     }
@@ -1965,7 +1948,7 @@ void FourierTransformer<ComputeBaseType, InputType, OtherImageType, Rank>::SetAn
                         // std::cerr << "batch_size_of<FFT>::value " << batch_size_of<FFT>::value << std::endl;
                         // std::cerr << "FFT::elements_per_thread " << FFT::elements_per_thread << std::endl;
                         block_fft_kernel_R2C_DECREASE_XY<FFT, data_io_t, data_buffer_t><<<LP.gridDims, LP.threadsPerBlock, shared_memory, cudaStreamPerThread>>>(
-                                d_ptr.external_input, d_ptr.buffer_1, LP.mem_offsets, LP.Q, workspace);
+                                d_ptr.external_input, d_ptr.buffer_1, LP.mem_offsets, LP.Q, exp_i2pi_P<FFT>( ), workspace);
                         postcheck;
                         current_buffer = fastfft_internal_buffer_1;
                     }
@@ -1994,7 +1977,7 @@ void FourierTransformer<ComputeBaseType, InputType, OtherImageType, Rank>::SetAn
                         MyFFTDebugAssertTrue(current_buffer == fastfft_external_input, "current_buffer != fastfft_external_input");
                         precheck;
                         block_fft_kernel_R2C_INCREASE_XY<FFT, data_io_t, data_buffer_t><<<LP.gridDims, LP.threadsPerBlock, shared_memory, cudaStreamPerThread>>>(
-                                d_ptr.external_input, reinterpret_cast<data_buffer_t*>(external_output_ptr), LP.mem_offsets, LP.Q, workspace);
+                                d_ptr.external_input, reinterpret_cast<data_buffer_t*>(external_output_ptr), LP.mem_offsets, LP.Q, exp_i2pi_P<FFT>( ), workspace);
                         postcheck;
                         current_buffer = aliased_output_buffer;
                     }
@@ -2002,7 +1985,7 @@ void FourierTransformer<ComputeBaseType, InputType, OtherImageType, Rank>::SetAn
                         MyFFTDebugAssertTrue(current_buffer == fastfft_external_input, "current_buffer != fastfft_external_input");
                         precheck;
                         block_fft_kernel_R2C_INCREASE_XY<FFT, data_io_t, data_buffer_t><<<LP.gridDims, LP.threadsPerBlock, shared_memory, cudaStreamPerThread>>>(
-                                d_ptr.external_input, d_ptr.buffer_1, LP.mem_offsets, LP.Q, workspace);
+                                d_ptr.external_input, d_ptr.buffer_1, LP.mem_offsets, LP.Q, exp_i2pi_P<FFT>( ), workspace);
                         postcheck;
                         current_buffer = fastfft_internal_buffer_1;
                     }
@@ -2034,7 +2017,7 @@ void FourierTransformer<ComputeBaseType, InputType, OtherImageType, Rank>::SetAn
                         cudaErr(cudaFuncSetAttribute((void*)block_fft_kernel_R2C_INCREASE_XZ<FFT, data_io_t, data_buffer_t>, cudaFuncAttributeMaxDynamicSharedMemorySize, shared_memory));
                         precheck;
                         block_fft_kernel_R2C_INCREASE_XZ<FFT, data_io_t, data_buffer_t><<<LP.gridDims, LP.threadsPerBlock, shared_memory, cudaStreamPerThread>>>(
-                                d_ptr.external_input, d_ptr.buffer_1, LP.mem_offsets, LP.Q, workspace);
+                                d_ptr.external_input, d_ptr.buffer_1, LP.mem_offsets, LP.Q, exp_i2pi_P<FFT>( ), workspace);
                         postcheck;
                         current_buffer = fastfft_internal_buffer_1;
 #endif
@@ -2130,14 +2113,14 @@ void FourierTransformer<ComputeBaseType, InputType, OtherImageType, Rank>::SetAn
                         MyFFTDebugAssertTrue(current_buffer == fastfft_external_input, "current_buffer != fastfft_external_input");
                         precheck;
                         block_fft_kernel_C2C_DECREASE<FFT, data_buffer_t><<<LP.gridDims, LP.threadsPerBlock, shared_memory, cudaStreamPerThread>>>(
-                                d_ptr.external_input, reinterpret_cast<data_buffer_t*>(external_output_ptr), LP.mem_offsets, LP.Q, workspace);
+                                d_ptr.external_input, reinterpret_cast<data_buffer_t*>(external_output_ptr), LP.mem_offsets, LP.Q, exp_i2pi_P<FFT>( ), workspace);
                         postcheck;
                     }
                     else if constexpr ( Rank == 2 ) {
                         MyFFTDebugAssertTrue(current_buffer == fastfft_internal_buffer_1, "current_buffer != fastfft_internal_buffer_1");
                         precheck;
                         block_fft_kernel_C2C_DECREASE<FFT, data_buffer_t><<<LP.gridDims, LP.threadsPerBlock, shared_memory, cudaStreamPerThread>>>(
-                                d_ptr.buffer_1, reinterpret_cast<data_buffer_t*>(external_output_ptr), LP.mem_offsets, LP.Q, workspace);
+                                d_ptr.buffer_1, reinterpret_cast<data_buffer_t*>(external_output_ptr), LP.mem_offsets, LP.Q, exp_i2pi_P<FFT>( ), workspace);
                         postcheck;
                     }
                     // Rank 3 not yet implemented
@@ -2196,21 +2179,21 @@ void FourierTransformer<ComputeBaseType, InputType, OtherImageType, Rank>::SetAn
                         MyFFTDebugAssertTrue(current_buffer == fastfft_external_input, "current_buffer != fastfft_external_input");
                         precheck;
                         block_fft_kernel_C2C_INCREASE<FFT, data_buffer_t><<<LP.gridDims, LP.threadsPerBlock, shared_memory, cudaStreamPerThread>>>(
-                                d_ptr.external_input, reinterpret_cast<data_buffer_t*>(external_output_ptr), LP.mem_offsets, LP.Q, workspace);
+                                d_ptr.external_input, reinterpret_cast<data_buffer_t*>(external_output_ptr), LP.mem_offsets, LP.Q, exp_i2pi_P<FFT>( ), workspace);
                         postcheck;
                     }
                     else if constexpr ( Rank == 2 ) {
                         MyFFTDebugAssertTrue(current_buffer == fastfft_internal_buffer_1, "current_buffer != fastfft_internal_buffer_1");
                         precheck;
                         block_fft_kernel_C2C_INCREASE<FFT, data_buffer_t><<<LP.gridDims, LP.threadsPerBlock, shared_memory, cudaStreamPerThread>>>(
-                                d_ptr.buffer_1, reinterpret_cast<data_buffer_t*>(external_output_ptr), LP.mem_offsets, LP.Q, workspace);
+                                d_ptr.buffer_1, reinterpret_cast<data_buffer_t*>(external_output_ptr), LP.mem_offsets, LP.Q, exp_i2pi_P<FFT>( ), workspace);
                         postcheck;
                     }
                     else if constexpr ( Rank == 3 ) {
                         MyFFTDebugAssertTrue(current_buffer == fastfft_internal_buffer_2, "current_buffer != fastfft_internal_buffer_2");
                         precheck;
                         block_fft_kernel_C2C_INCREASE<FFT, data_buffer_t><<<LP.gridDims, LP.threadsPerBlock, shared_memory, cudaStreamPerThread>>>(
-                                d_ptr.buffer_2, reinterpret_cast<data_buffer_t*>(external_output_ptr), LP.mem_offsets, LP.Q, workspace);
+                                d_ptr.buffer_2, reinterpret_cast<data_buffer_t*>(external_output_ptr), LP.mem_offsets, LP.Q, exp_i2pi_P<FFT>( ), workspace);
                         postcheck;
                     }
                     current_buffer = aliased_output_buffer;
@@ -2329,7 +2312,7 @@ void FourierTransformer<ComputeBaseType, InputType, OtherImageType, Rank>::SetAn
                         MyFFTDebugAssertTrue(current_buffer == fastfft_external_input, "current_buffer != fastfft_external_input");
                         precheck;
                         block_fft_kernel_C2C_DECREASE<FFT, data_buffer_t><<<LP.gridDims, LP.threadsPerBlock, shared_memory, cudaStreamPerThread>>>(
-                                reinterpret_cast<data_buffer_t*>(d_ptr.external_input), external_output_ptr, LP.mem_offsets, LP.Q, workspace);
+                                reinterpret_cast<data_buffer_t*>(d_ptr.external_input), external_output_ptr, LP.mem_offsets, LP.Q, exp_i2pi_P<FFT>( ), workspace);
                         postcheck;
                         current_buffer = aliased_output_buffer;
                     }
@@ -2337,7 +2320,7 @@ void FourierTransformer<ComputeBaseType, InputType, OtherImageType, Rank>::SetAn
                         MyFFTDebugAssertTrue(current_buffer == fastfft_external_input, "current_buffer != fastfft_external_input");
                         precheck;
                         block_fft_kernel_C2C_DECREASE<FFT, data_buffer_t><<<LP.gridDims, LP.threadsPerBlock, shared_memory, cudaStreamPerThread>>>(
-                                reinterpret_cast<data_buffer_t*>(d_ptr.external_input), d_ptr.buffer_1, LP.mem_offsets, LP.Q, workspace);
+                                reinterpret_cast<data_buffer_t*>(d_ptr.external_input), d_ptr.buffer_1, LP.mem_offsets, LP.Q, exp_i2pi_P<FFT>( ), workspace);
                         postcheck;
                         current_buffer = fastfft_internal_buffer_1;
                     }
