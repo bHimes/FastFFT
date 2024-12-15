@@ -19,6 +19,13 @@ NVCC_FLAGS+=-DCUFFTDX_DISABLE_CUTLASS_DEPENDENCY
 # In initial dev, only compile for 70 or 86 depending on which workstation I'm on, b/c it is faster.
 SMS ?=  86
 
+
+ifeq (${minBlocksPerMultiprocessor},)
+else
+NVCC_FLAGS+=-DminBlocksPerMultiprocessor=${minBlocksPerMultiprocessor}
+$(info "setting minBlocksPerMultiprocessor to [${minBlocksPerMultiprocessor}]")
+endif 
+
 ifeq (${FastFFT_lto},1)
 $(info "Building with LTO")
 GENCODE_FLAGS := -gencode arch=compute_86,code=lto_86

@@ -1468,8 +1468,8 @@ __launch_bounds__(FFT::max_threads_per_block) __global__
     io<FFT>::store_c2r(thread_data, &output_values[Return1DFFTAddress(mem_offsets.physical_x_output)], size_of<FFT>::value);
 }
 
-template <class FFT, class InputData_t, class OutputData_t>
-__launch_bounds__(FFT::max_threads_per_block) __global__
+template <class FFT, class InputData_t, class OutputData_t, unsigned int min_blocks_per_multiprocessor>
+__launch_bounds__(FFT::max_threads_per_block, min_blocks_per_multiprocessor) __global__
         void block_fft_kernel_C2R_NONE_XY(const InputData_t* __restrict__ input_values, OutputData_t* __restrict__ output_values, Offsets mem_offsets, typename FFT::workspace_type workspace) {
 
     using complex_compute_t = typename FFT::value_type;
@@ -1484,6 +1484,8 @@ __launch_bounds__(FFT::max_threads_per_block) __global__
     // For loop zero the twiddles don't need to be computed
     FFT( ).execute(thread_data, shared_mem, workspace);
 
+    // FIXME
+    // io<FFT>::store_c2r(thread_data, &output_values[Return1DFFTAddress(mem_offsets.physical_x_output)], size_of<FFT>::value);
     io<FFT>::store_c2r(thread_data, &output_values[Return1DFFTAddress(mem_offsets.physical_x_output)]);
 }
 
@@ -2403,15 +2405,18 @@ void FourierTransformer<ComputeBaseType, InputType, OtherImageType, Rank>::SetAn
                     cudaErr(error_code);
 
                     int shared_memory = FFT::shared_memory_size;
-
+                    // get_threads_per_block<size_of<FFT>::value, 4096, FFT::max_threads_per_block>( );
                     CheckSharedMemory(shared_memory, device_properties);
+
+                    // FIXME: not tested for 3d
+                    constexpr unsigned int min_blocks_per_multiprocessor = size_of<FFT>::value >= 4096 ? 3 : 2;
 #if FFT_DEBUG_STAGE > 6
-                    cudaErr(cudaFuncSetAttribute((void*)block_fft_kernel_C2R_NONE_XY<FFT, data_buffer_t, data_io_t>, cudaFuncAttributeMaxDynamicSharedMemorySize, shared_memory));
+                    cudaErr(cudaFuncSetAttribute((void*)block_fft_kernel_C2R_NONE_XY<FFT, data_buffer_t, data_io_t, min_blocks_per_multiprocessor>, cudaFuncAttributeMaxDynamicSharedMemorySize, shared_memory));
 
                     if constexpr ( Rank == 1 ) {
                         MyFFTDebugAssertTrue(current_buffer == fastfft_external_input, "current_buffer != fastfft_external_input");
                         precheck;
-                        block_fft_kernel_C2R_NONE_XY<FFT, data_buffer_t, data_io_t><<<LP.gridDims, LP.threadsPerBlock, shared_memory, cudaStreamPerThread>>>(
+                        block_fft_kernel_C2R_NONE_XY<FFT, data_buffer_t, data_io_t, min_blocks_per_multiprocessor><<<LP.gridDims, LP.threadsPerBlock, shared_memory, cudaStreamPerThread>>>(
                                 reinterpret_cast<data_buffer_t*>(d_ptr.external_input), external_output_ptr, LP.mem_offsets, workspace);
                         postcheck;
                     }
@@ -2422,14 +2427,14 @@ void FourierTransformer<ComputeBaseType, InputType, OtherImageType, Rank>::SetAn
                         if ( current_buffer == fastfft_internal_buffer_1 ) {
                             // Presumably this is intended to be the second step of an InvFFT
                             precheck;
-                            block_fft_kernel_C2R_NONE_XY<FFT, data_buffer_t, data_io_t><<<LP.gridDims, LP.threadsPerBlock, shared_memory, cudaStreamPerThread>>>(
+                            block_fft_kernel_C2R_NONE_XY<FFT, data_buffer_t, data_io_t, min_blocks_per_multiprocessor><<<LP.gridDims, LP.threadsPerBlock, shared_memory, cudaStreamPerThread>>>(
                                     d_ptr.buffer_1, external_output_ptr, LP.mem_offsets, workspace);
                             postcheck;
                         }
                         else if ( current_buffer == fastfft_internal_buffer_2 ) {
                             // Presumably this is intended to be the last step in a FwdImgInv
                             precheck;
-                            block_fft_kernel_C2R_NONE_XY<FFT, data_buffer_t, data_io_t><<<LP.gridDims, LP.threadsPerBlock, shared_memory, cudaStreamPerThread>>>(
+                            block_fft_kernel_C2R_NONE_XY<FFT, data_buffer_t, data_io_t, min_blocks_per_multiprocessor><<<LP.gridDims, LP.threadsPerBlock, shared_memory, cudaStreamPerThread>>>(
                                     d_ptr.buffer_2, external_output_ptr, LP.mem_offsets, workspace);
                             postcheck;
                         }

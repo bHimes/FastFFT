@@ -7,7 +7,7 @@ void compare_libraries(std::vector<int> size, FastFFT::SizeChangeType::Enum size
 
     using SCT = FastFFT::SizeChangeType::Enum;
 
-    constexpr bool skip_cufft_for_profiling = true;
+    constexpr bool skip_cufft_for_profiling = false;
     constexpr bool print_out_time           = true;
     // bool set_padding_callback = false; // the padding callback is slower than pasting in b/c the read size of the pointers is larger than the actual data. do not use.
     bool set_conjMult_callback   = true;
@@ -406,8 +406,8 @@ int main(int argc, char** argv) {
     bool run_2d_performance_tests = false;
     bool run_3d_performance_tests = false;
 
-    const std::string_view text_line = "simple convolution";
-    FastFFT::CheckInputArgs(argc, argv, text_line, run_2d_performance_tests, run_3d_performance_tests);
+    const std::string_view          text_line = "simple convolution";
+    std::array<std::vector<int>, 4> test_size = FastFFT::CheckInputArgs(argc, argv, text_line, run_2d_performance_tests, run_3d_performance_tests);
 
     // TODO: size decrease
     if ( run_2d_performance_tests ) {
@@ -422,10 +422,8 @@ int main(int argc, char** argv) {
         // compare_libraries<2>(FastFFT::test_size, size_change_type, false);
         // // compare_libraries<2>(test_size_rectangle, do_3d, size_change_type, true);
 
-        std::vector<int> tmptest_size = {256, 4096};
-
         size_change_type = SCT::increase;
-        compare_libraries<2>(tmptest_size, size_change_type, false);
+        compare_libraries<2>(test_size.at(0), size_change_type, false);
         // compare_libraries<2>(test_size_rectangle, do_3d, size_change_type, true);
 
         // size_change_type = SCT::decrease;
