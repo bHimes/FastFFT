@@ -21,6 +21,26 @@
 
 namespace FastFFT {
 
+// If we are using the suggested ept we need to scale some down that otherwise requiest too many registers as cufftdx is unaware of the higher order transforms.
+template <class Description>
+struct check_and_set_ept {
+    static_assert(is_fft<Description>::value, "Description is not a cuFFTDx FFT description");
+// Get the existing elements per thread
+
+// FIXME: The same logic should be added to USE_SUPPLIED_EPT
+// FIXME: THE SAME logic should be applied if USE_FOLDED_R2C is implemented
+#ifdef USE_FOLDED_C2R
+    using check_ept = std::conditional_t<type_of<Description>::value == fft_type::c2r, cufftdx::replace_t<Description, ElementsPerThread<Description::elements_per_thread * 2>>, Description>;
+#else
+    using check_ept = Description;
+#endif
+
+  public:
+    using type = check_ept;
+};
+template <class Description>
+using check_ept_t = typename check_and_set_ept<Description>::type;
+
 template <class ExternalImage_t, class FFT, class invFFT, class ComplexData_t, class PreOpType, class IntraOpType, class PostOpType>
 __launch_bounds__(FFT::max_threads_per_block) __global__
         void block_fft_kernel_C2C_FWD_INCREASE_OP_INV_NONE(const ExternalImage_t* __restrict__ image_to_search, const ComplexData_t* __restrict__ input_values, ComplexData_t* __restrict__ output_values,
@@ -92,7 +112,8 @@ void FourierTransformer<ComputeBaseType, InputType, OtherImageType, Rank>::SetDe
     current_buffer            = fastfft_external_input;
     transform_stage_completed = 0;
 
-    implicit_dimension_change = false;
+    fwd_implicit_dimension_change = false;
+    inv_implicit_dimension_change = false;
 
     is_fftw_padded_input  = false; // Padding for in place r2c transforms
     is_fftw_padded_output = false; // Currently the output state will match the input state, otherwise it is an error.
@@ -328,7 +349,8 @@ FourierTransformer<ComputeBaseType, InputType, OtherImageType, Rank>::Generic_Fw
     SetDimensions(DimensionCheckType::FwdTransform);
 
     // TODO: extend me
-    MyFFTRunTimeAssertFalse(implicit_dimension_change, "Implicit dimension change not yet supported for FwdFFT");
+    MyFFTRunTimeAssertFalse(fwd_implicit_dimension_change, "Implicit dimension change not yet supported for FwdFFT");
+    MyFFTRunTimeAssertFalse(inv_implicit_dimension_change, "Implicit dimension change not yet supported for FwdFFT");
 
     // SetPrecisionAndExectutionMethod<Generic_Fwd_FFT>(<Generic_Inv_FFT, KernelType kernel_type, bool  bool use_thread_method)
     if constexpr ( Rank == 1 ) {
@@ -444,7 +466,8 @@ FourierTransformer<ComputeBaseType, InputType, OtherImageType, Rank>::Generic_In
                                                                                   PostOpType  post_op) {
 
     SetDimensions(DimensionCheckType::InvTransform);
-    MyFFTRunTimeAssertFalse(implicit_dimension_change, "Implicit dimension change not yet supported for InvFFT");
+    MyFFTRunTimeAssertFalse(fwd_implicit_dimension_change, "Implicit dimension change not yet supported for InvFFT");
+    MyFFTRunTimeAssertFalse(inv_implicit_dimension_change, "Implicit dimension change not yet supported for InvFFT");
 
     switch ( transform_dimension ) {
         case 1: {
@@ -844,36 +867,36 @@ void FourierTransformer<ComputeBaseType, InputType, OtherImageType, Rank>::Valid
     //       the caller may be "surprised" by the size change.
     if ( ! IsAPowerOfTwo(fwd_dims_in.x) ) {
         MyFFTRunTimeAssertTrue(fwd_size_change_type == SizeChangeType::increase, "Input x dimension must be a power of 2");
-        implicit_dimension_change = true;
+        fwd_implicit_dimension_change = true;
     }
     if ( ! IsAPowerOfTwo(fwd_dims_in.y) ) {
         MyFFTRunTimeAssertTrue(fwd_size_change_type == SizeChangeType::increase, "Input y dimension must be a power of 2");
-        implicit_dimension_change = true;
+        fwd_implicit_dimension_change = true;
     }
     if ( ! IsAPowerOfTwo(fwd_dims_in.z) ) {
         MyFFTRunTimeAssertTrue(fwd_size_change_type == SizeChangeType::increase, "Input z dimension must be a power of 2");
-        implicit_dimension_change = true;
+        fwd_implicit_dimension_change = true;
     }
 
-    MyFFTRunTimeAssertTrue(IsAPowerOfTwo(fwd_dims_out.x), "Output x dimension must be a power of 2");
-    MyFFTRunTimeAssertTrue(IsAPowerOfTwo(fwd_dims_out.y), "Output y dimension must be a power of 2");
-    MyFFTRunTimeAssertTrue(IsAPowerOfTwo(fwd_dims_out.z), "Output z dimension must be a power of 2");
+    MyFFTRunTimeAssertTrue(IsAPowerOfTwo(fwd_dims_out.x), "fwd Output x dimension must be a power of 2");
+    MyFFTRunTimeAssertTrue(IsAPowerOfTwo(fwd_dims_out.y), "fwd Output y dimension must be a power of 2");
+    MyFFTRunTimeAssertTrue(IsAPowerOfTwo(fwd_dims_out.z), "fwd Output z dimension must be a power of 2");
 
-    MyFFTRunTimeAssertTrue(IsAPowerOfTwo(inv_dims_in.x), "Input x dimension must be a power of 2");
-    MyFFTRunTimeAssertTrue(IsAPowerOfTwo(inv_dims_in.y), "Input y dimension must be a power of 2");
-    MyFFTRunTimeAssertTrue(IsAPowerOfTwo(inv_dims_in.z), "Input z dimension must be a power of 2");
+    MyFFTRunTimeAssertTrue(IsAPowerOfTwo(inv_dims_in.x), "inv Input x dimension must be a power of 2");
+    MyFFTRunTimeAssertTrue(IsAPowerOfTwo(inv_dims_in.y), "inv Input y dimension must be a power of 2");
+    MyFFTRunTimeAssertTrue(IsAPowerOfTwo(inv_dims_in.z), "inv Input z dimension must be a power of 2");
 
     if ( ! IsAPowerOfTwo(inv_dims_out.x) ) {
         MyFFTRunTimeAssertTrue(inv_size_change_type == SizeChangeType::decrease, "Output x dimension must be a power of 2");
-        implicit_dimension_change = true;
+        inv_implicit_dimension_change = true;
     }
     if ( ! IsAPowerOfTwo(inv_dims_out.y) ) {
         MyFFTRunTimeAssertTrue(inv_size_change_type == SizeChangeType::decrease, "Output y dimension must be a power of 2");
-        implicit_dimension_change = true;
+        inv_implicit_dimension_change = true;
     }
     if ( ! IsAPowerOfTwo(inv_dims_out.z) ) {
         MyFFTRunTimeAssertTrue(inv_size_change_type == SizeChangeType::decrease, "Output z dimension must be a power of 2");
-        implicit_dimension_change = true;
+        inv_implicit_dimension_change = true;
     }
 
     is_size_validated = true;
@@ -1465,7 +1488,7 @@ __launch_bounds__(FFT::max_threads_per_block) __global__
     // For loop zero the twiddles don't need to be computed
     FFT( ).execute(thread_data, shared_mem, workspace);
 
-    io<FFT>::store_c2r(thread_data, &output_values[Return1DFFTAddress(mem_offsets.physical_x_output)], size_of<FFT>::value);
+    io<FFT>::store_c2r(thread_data, &output_values[Return1DFFTAddress(mem_offsets.physical_x_output)]);
 }
 
 template <class FFT, class InputData_t, class OutputData_t, unsigned int min_blocks_per_multiprocessor>
@@ -1504,23 +1527,7 @@ __global__ void block_fft_kernel_C2R_DECREASE_XY(const InputData_t* __restrict__
     // For loop zero the twiddles don't need to be computed
     FFT( ).execute(thread_data, shared_mem, workspace);
 
-    io<FFT>::store_c2r(thread_data, &output_values[Return1DFFTAddress(mem_offsets.physical_x_output)], size_of<FFT>::value);
-
-    // // Load transposed data into shared memory in natural order.
-    // io<FFT>::load_c2r_shared_and_pad(&input_values[blockIdx.y], shared_mem, mem_offsets.physical_x_input);
-
-    // // DIT shuffle, bank conflict free
-    // io<FFT>::copy_from_shared(shared_mem, thread_data, Q);
-
-    // constexpr const unsigned int fft_shared_mem_num_elements = FFT::shared_memory_size / sizeof(complex_compute_t);
-    // FFT().execute(thread_data, &shared_mem[fft_shared_mem_num_elements * threadIdx.y], workspace);
-    // __syncthreads();
-
-    // // Full twiddle multiply and store in natural order in shared memory
-    // io<FFT>::reduce_block_fft(thread_data, shared_mem, twiddle_in, Q);
-
-    // // Reduce from shared memory into registers, ending up with only P valid outputs.
-    // io<FFT>::store_c2r_reduced(thread_data, &output_values[Return1DFFTAddress(mem_offsets.physical_x_output)]);
+    io<FFT>::store_c2r(thread_data, &output_values[Return1DFFTAddress(mem_offsets.physical_x_output)]);
 }
 
 // FIXME assumed FWD
@@ -2345,10 +2352,13 @@ void FourierTransformer<ComputeBaseType, InputType, OtherImageType, Rank>::SetAn
 
             case c2r_none: {
                 if constexpr ( FFT_ALGO_t == Generic_Inv_FFT ) {
-#ifdef USE_FOLDED_R2C_C2R
-                    using FFT = decltype(FFT_base_arch( ) + Direction<fft_direction::inverse>( ) + Type<fft_type::c2r>( ) + RealFFTOptions<complex_layout::natural, real_mode::folded>);
+#ifdef USE_FOLDED_C2R
+                    using c2r_folded_options = RealFFTOptions<complex_layout::natural, real_mode::folded>;
+                    using extended_base      = decltype(FFT_base_arch( ) + Direction<fft_direction::inverse>( ) + Type<fft_type::c2r>( ) + c2r_folded_options( ));
+                    using FFT                = check_ept_t<extended_base>;
+
 #else
-                    using FFT = decltype(FFT_base_arch( ) + Direction<fft_direction::inverse>( ) + Type<fft_type::c2r>( ));
+                    using FFT = check_ept_t<decltype(FFT_base_arch( ) + Direction<fft_direction::inverse>( ) + Type<fft_type::c2r>( ))>;
 #endif
 
                     LaunchParams LP = SetLaunchParameters(c2r_none);
@@ -2392,10 +2402,13 @@ void FourierTransformer<ComputeBaseType, InputType, OtherImageType, Rank>::SetAn
 
             case c2r_none_XY: {
                 if constexpr ( FFT_ALGO_t == Generic_Inv_FFT ) {
-#ifdef USE_FOLDED_R2C_C2R
-                    using FFT = decltype(FFT_base_arch( ) + Direction<fft_direction::inverse>( ) + Type<fft_type::c2r>( ) + RealFFTOptions<complex_layout::natural, real_mode::folded>);
+#ifdef USE_FOLDED_C2R
+                    using c2r_folded_options = RealFFTOptions<complex_layout::natural, real_mode::folded>;
+                    using extended_base      = decltype(FFT_base_arch( ) + Direction<fft_direction::inverse>( ) + Type<fft_type::c2r>( ) + c2r_folded_options( ));
+                    using FFT                = check_ept_t<extended_base>;
+
 #else
-                    using FFT = decltype(FFT_base_arch( ) + Direction<fft_direction::inverse>( ) + Type<fft_type::c2r>( ));
+                    using FFT = check_ept_t<decltype(FFT_base_arch( ) + Direction<fft_direction::inverse>( ) + Type<fft_type::c2r>( ))>;
 #endif
 
                     LaunchParams LP = SetLaunchParameters(c2r_none_XY);
@@ -2449,10 +2462,13 @@ void FourierTransformer<ComputeBaseType, InputType, OtherImageType, Rank>::SetAn
 
             case c2r_decrease_XY: {
                 if constexpr ( FFT_ALGO_t == Generic_Inv_FFT ) {
-#ifdef USE_FOLDED_R2C_C2R
-                    using FFT = decltype(FFT_base_arch( ) + Direction<fft_direction::inverse>( ) + Type<fft_type::c2r>( ) + RealFFTOptions<complex_layout::natural, real_mode::folded>);
+#ifdef USE_FOLDED_C2R
+                    using c2r_folded_options = RealFFTOptions<complex_layout::natural, real_mode::folded>;
+                    using extended_base      = decltype(FFT_base_arch( ) + Direction<fft_direction::inverse>( ) + Type<fft_type::c2r>( ) + c2r_folded_options( ));
+                    using FFT                = check_ept_t<extended_base>;
+
 #else
-                    using FFT = decltype(FFT_base_arch( ) + Direction<fft_direction::inverse>( ) + Type<fft_type::c2r>( ));
+                    using FFT = check_ept_t<decltype(FFT_base_arch( ) + Direction<fft_direction::inverse>( ) + Type<fft_type::c2r>( ))>;
 #endif
 
                     LaunchParams LP = SetLaunchParameters(c2r_decrease_XY);

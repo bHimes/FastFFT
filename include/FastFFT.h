@@ -344,7 +344,8 @@ class FourierTransformer {
     SizeChangeType::Enum fwd_size_change_type;
     SizeChangeType::Enum inv_size_change_type;
 
-    bool implicit_dimension_change;
+    bool fwd_implicit_dimension_change;
+    bool inv_implicit_dimension_change;
 
     int transform_stage_completed;
 

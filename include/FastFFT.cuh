@@ -2,7 +2,7 @@
 #include "FastFFT.h"
 
 // #define USE_FOLDED_R2C_C2R
-
+#define USE_FOLDED_C2R
 // #ifndef minBlocksPerMultiprocessor
 // #error "minBlocksPerMultiprocessor not defined"
 // #endif
