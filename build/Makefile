@@ -4,7 +4,8 @@ NVCC=nvcc
 NVCC_FLAGS=-ccbin=g++ -t 8 
 # TODO: static may need to be added later or independently just for benchmarks, while libs to link through python are probably going to need to be dynamic. --split-compile=8
 NVCC_FLAGS+=--cudart=static
-NVCC_FLAGS+=--default-stream per-thread -m64 -O3 --use_fast_math --extra-device-vectorization --extended-lambda --Wext-lambda-captures-this -std=c++17 -Xptxas --warn-on-local-memory-usage,--warn-on-spills,--warn-on-double-precision-use --generate-line-info -Xcompiler=-std=c++17
+NVCC_FLAGS+=--default-stream per-thread -m64 -O3 --use_fast_math --extra-device-vectorization --extended-lambda --Wext-lambda-captures-this -std=c++17 
+NVCC_FLAGS+=-Xptxas --warn-on-local-memory-usage,--warn-on-spills,--warn-on-double-precision-use --generate-line-info -Xcompiler=-std=c++17
 # Experimental flag to allow relaxed constexpr host call in device code
 NVCC_FLAGS+=--expt-relaxed-constexpr
 # For testing, particularly until the cufftdx::BlockDim() operator is enabled
@@ -26,14 +27,23 @@ NVCC_FLAGS+=-DminBlocksPerMultiprocessor=${minBlocksPerMultiprocessor}
 $(info "setting minBlocksPerMultiprocessor to [${minBlocksPerMultiprocessor}]")
 endif 
 
-ifeq (${FastFFT_lto},1)
-$(info "Building with LTO")
-GENCODE_FLAGS := -gencode arch=compute_86,code=lto_86
+ifeq (${c2r_multiplier},)
 else
-$(info "Building without LTO")
-GENCODE_FLAGS := -gencode arch=compute_86,code=sm_86
-endif
+NVCC_FLAGS+=-Dc2r_multiplier=${c2r_multiplier}
+$(info "setting c2r_multiplier to [${c2r_multiplier}]")
+endif 
 
+# ifeq (${FastFFT_lto},1)
+# $(info "Building with LTO")
+# GENCODE_FLAGS := -gencode arch=compute_86,code=lto_86
+# else
+# $(info "Building without LTO")
+# GENCODE_FLAGS := -gencode arch=compute_86,code=sm_86
+# endif
+
+# GENCODE_FLAGS := --gpu-architecture=sm_86 -gencode=arch=compute_86,code=compute_86 -gencode=arch=compute_80,code=sm_80 -gencode=arch=compute_89,code=sm_89
+GENCODE_FLAGS := --gpu-architecture=sm_86 -gencode=arch=compute_86,code=compute_86
+# NVCC_FLAGS+=-DFastFFT_sizes=512,4096
 
 # TODO:
 # Lets first clean this up to have several targets, one for the library, one for the tests and move the helper Image object to the tests.

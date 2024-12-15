@@ -15,9 +15,21 @@
 #error "FFT_DEBUG_LEVEL must be defined"
 #endif
 
+#ifndef c2r_multiplier
+#define c2r_multiplier 2
+#endif
+
+#ifndef minBlocksPerMultiprocessor
+#define minBlocksPerMultiprocessor 3
+#endif
+
 // The cufftdx library code assumes that both shared_memory and shared_memory_input are aligned to 128 bits for optimal memory operations.
 // rather than saying extern __shared__ __align__(16) value_type shared_mem[]; we define the following instead.
 #define FastFFT_SMEM extern __shared__ __align__(16)
+
+#define FastFFT_build_sizes 32, 64, 128, 256, 512, 1024, 2048, 4096
+
+// #define FastFFT_build_sizes 256, 4096
 
 namespace FastFFT {
 
@@ -30,7 +42,7 @@ struct check_and_set_ept {
 // FIXME: The same logic should be added to USE_SUPPLIED_EPT
 // FIXME: THE SAME logic should be applied if USE_FOLDED_R2C is implemented
 #ifdef USE_FOLDED_C2R
-    using check_ept = std::conditional_t<type_of<Description>::value == fft_type::c2r, cufftdx::replace_t<Description, ElementsPerThread<Description::elements_per_thread * 2>>, Description>;
+    using check_ept = std::conditional_t<type_of<Description>::value == fft_type::c2r, cufftdx::replace_t<Description, ElementsPerThread<Description::elements_per_thread * c2r_multiplier>>, Description>;
 #else
     using check_ept = Description;
 #endif
@@ -1662,7 +1674,7 @@ void FourierTransformer<ComputeBaseType, InputType, OtherImageType, Rank>::SetIn
                                                                                                    IntraOpType     intra_op_functor,
                                                                                                    PostOpType      post_op_functor) {
 
-    SelectSizeAndType<FFT_ALGO_t, FFT_base, PreOpType, IntraOpType, PostOpType, 16, 32, 64, 128, 256, 512, 1024, 2048, 4096>(other_image_ptr, kernel_type, pre_op_functor, intra_op_functor, post_op_functor);
+    SelectSizeAndType<FFT_ALGO_t, FFT_base, PreOpType, IntraOpType, PostOpType, FastFFT_build_sizes>(other_image_ptr, kernel_type, pre_op_functor, intra_op_functor, post_op_functor);
 }
 
 template <class ComputeBaseType, class InputType, class OtherImageType, int Rank>
@@ -2358,7 +2370,7 @@ void FourierTransformer<ComputeBaseType, InputType, OtherImageType, Rank>::SetAn
                     using FFT                = check_ept_t<extended_base>;
 
 #else
-                    using FFT = check_ept_t<decltype(FFT_base_arch( ) + Direction<fft_direction::inverse>( ) + Type<fft_type::c2r>( ))>;
+                    using FFT                                            = check_ept_t<decltype(FFT_base_arch( ) + Direction<fft_direction::inverse>( ) + Type<fft_type::c2r>( ))>;
 #endif
 
                     LaunchParams LP = SetLaunchParameters(c2r_none);
@@ -2408,10 +2420,14 @@ void FourierTransformer<ComputeBaseType, InputType, OtherImageType, Rank>::SetAn
                     using FFT                = check_ept_t<extended_base>;
 
 #else
-                    using FFT = check_ept_t<decltype(FFT_base_arch( ) + Direction<fft_direction::inverse>( ) + Type<fft_type::c2r>( ))>;
+                    using FFT                                            = check_ept_t<decltype(FFT_base_arch( ) + Direction<fft_direction::inverse>( ) + Type<fft_type::c2r>( ))>;
 #endif
 
                     LaunchParams LP = SetLaunchParameters(c2r_none_XY);
+
+#ifdef USE_FOLDED_C2R
+                    LP.threadsPerBlock.x /= c2r_multiplier;
+#endif
 
                     cudaError_t error_code = cudaSuccess;
                     auto        workspace  = make_workspace<FFT>(error_code);
@@ -2421,8 +2437,13 @@ void FourierTransformer<ComputeBaseType, InputType, OtherImageType, Rank>::SetAn
                     // get_threads_per_block<size_of<FFT>::value, 4096, FFT::max_threads_per_block>( );
                     CheckSharedMemory(shared_memory, device_properties);
 
-                    // FIXME: not tested for 3d
+// FIXME: not tested for 3d
+#ifndef minBlocksPerMultiprocessor
                     constexpr unsigned int min_blocks_per_multiprocessor = size_of<FFT>::value >= 4096 ? 3 : 2;
+#else
+                    constexpr unsigned int min_blocks_per_multiprocessor = minBlocksPerMultiprocessor;
+#endif
+
 #if FFT_DEBUG_STAGE > 6
                     cudaErr(cudaFuncSetAttribute((void*)block_fft_kernel_C2R_NONE_XY<FFT, data_buffer_t, data_io_t, min_blocks_per_multiprocessor>, cudaFuncAttributeMaxDynamicSharedMemorySize, shared_memory));
 
@@ -2468,7 +2489,7 @@ void FourierTransformer<ComputeBaseType, InputType, OtherImageType, Rank>::SetAn
                     using FFT                = check_ept_t<extended_base>;
 
 #else
-                    using FFT = check_ept_t<decltype(FFT_base_arch( ) + Direction<fft_direction::inverse>( ) + Type<fft_type::c2r>( ))>;
+                    using FFT                                            = check_ept_t<decltype(FFT_base_arch( ) + Direction<fft_direction::inverse>( ) + Type<fft_type::c2r>( ))>;
 #endif
 
                     LaunchParams LP = SetLaunchParameters(c2r_decrease_XY);

@@ -3,9 +3,6 @@
 
 // #define USE_FOLDED_R2C_C2R
 #define USE_FOLDED_C2R
-// #ifndef minBlocksPerMultiprocessor
-// #error "minBlocksPerMultiprocessor not defined"
-// #endif
 
 #ifndef __INCLUDE_FAST_FFT_CUH__
 #define __INCLUDE_FAST_FFT_CUH__
@@ -786,24 +783,30 @@ struct io {
                 output[output_MAP[i] * pixel_pitch + blockIdx.y] = convert_if_needed<FFT, data_io_t>(thread_data, i);
             // if (blockIdx.y == 32) printf("from store transposed %i , val %f %f\n", output_MAP[i], thread_data[i].x, thread_data[i].y);
         }
-        // constexpr unsigned int threads_per_fft        = cufftdx::size_of<FFT>::value / FFT::elements_per_thread;
-        // constexpr unsigned int output_values_to_store = (cufftdx::size_of<FFT>::value / 2) + 1;
-        // constexpr unsigned int values_left_to_store = threads_per_fft == 1 ? 1 : (output_values_to_store % threads_per_fft);
-        // if (threadIdx.x < values_left_to_store)
-        // {
-        //   printf("index, pitch, blcok, address %i, %i, %i, %i\n", output_MAP[FFT::elements_per_thread / 2], pixel_pitch, blockIdx.y, output_MAP[FFT::elements_per_thread / 2]*pixel_pitch + blockIdx.y);
-        //   if (output_MAP[FFT::elements_per_thread / 2] < memory_limit) output[output_MAP[FFT::elements_per_thread / 2]*pixel_pitch + blockIdx.y] =  thread_data[FFT::elements_per_thread / 2];
-        // }
     }
 
     template <typename data_io_t>
     static inline __device__ void load_c2r(const data_io_t* __restrict__ input,
                                            complex_compute_t* __restrict__ thread_data) {
-        const unsigned int stride = stride_size( );
-        unsigned int       index  = threadIdx.x;
+#ifdef USE_FOLDED_C2R
+        constexpr auto inner_loop_limit = sizeof(complex_compute_t) / sizeof(data_io_t);
+        unsigned int   index            = threadIdx.x * inner_loop_limit;
+        for ( unsigned int i = 0; i < FFT::input_ept; i++ ) {
+            for ( unsigned int j = 0; j < inner_loop_limit; ++j ) {
+                // if ( (i * stride * inner_loop_limit + j + threadIdx.x * inner_loop_limit) < SignalLength ) {
+                thread_data[i * inner_loop_limit + j] = convert_if_needed<FFT, complex_compute_t>(input, index + j);
+                // }
+                // else {
+                //     reinterpret_cast<IOType*>(thread_data)[i * inner_loop_limit + j] = get_zero<typename complex_type::value_type>( );
+                // }
+            }
+            index += inner_loop_limit * FFT::stride;
+        }
+#else
+        unsigned int index = threadIdx.x;
         for ( unsigned int i = 0; i < FFT::elements_per_thread / 2; i++ ) {
             thread_data[i] = convert_if_needed<FFT, complex_compute_t>(input, index);
-            index += stride;
+            index += FFT::stride;
         }
         constexpr unsigned int threads_per_fft       = cufftdx::size_of<FFT>::value / FFT::elements_per_thread;
         constexpr unsigned int output_values_to_load = (cufftdx::size_of<FFT>::value / 2) + 1;
@@ -812,18 +815,35 @@ struct io {
         if ( threadIdx.x < values_left_to_load ) {
             thread_data[FFT::elements_per_thread / 2] = convert_if_needed<FFT, complex_compute_t>(input, index);
         }
+#endif
     }
 
     template <typename data_io_t>
     static inline __device__ void load_c2r_transposed(const data_io_t* __restrict__ input,
                                                       complex_compute_t* __restrict__ thread_data,
                                                       unsigned int pixel_pitch) {
-        const unsigned int stride = stride_size( );
-        unsigned int       index  = threadIdx.x;
-        for ( unsigned int i = 0; i < FFT::elements_per_thread / 2; i++ ) {
-            thread_data[i] = convert_if_needed<FFT, complex_compute_t>(input, (pixel_pitch * index) + blockIdx.y);
-            index += stride;
+
+#ifdef USE_FOLDED_C2R
+        constexpr auto inner_loop_limit = sizeof(complex_compute_t) / sizeof(data_io_t);
+        unsigned int   index            = threadIdx.x * inner_loop_limit;
+        for ( unsigned int i = 0; i < FFT::input_ept; i++ ) {
+            for ( unsigned int j = 0; j < inner_loop_limit; ++j ) {
+                // if ( (i * stride * inner_loop_limit + j + threadIdx.x * inner_loop_limit) < SignalLength ) {
+                thread_data[i * inner_loop_limit + j] = convert_if_needed<FFT, complex_compute_t>(input, (pixel_pitch * index) + (blockIdx.y + j));
+                // }
+                // else {
+                //     reinterpret_cast<IOType*>(thread_data)[i * inner_loop_limit + j] = get_zero<typename complex_type::value_type>( );
+                // }
+            }
+            index += inner_loop_limit * FFT::stride;
         }
+#else
+        unsigned int index = threadIdx.x;
+        for ( unsigned int i = 0; i < loop_limit; i++ ) {
+            thread_data[i] = convert_if_needed<FFT, complex_compute_t>(input, (pixel_pitch * index) + blockIdx.y);
+            index += FFT::stride;
+        }
+
         constexpr unsigned int threads_per_fft       = cufftdx::size_of<FFT>::value / FFT::elements_per_thread;
         constexpr unsigned int output_values_to_load = (cufftdx::size_of<FFT>::value / 2) + 1;
         // threads_per_fft == 1 means that EPT == SIZE, so we need to load one more element
@@ -831,25 +851,7 @@ struct io {
         if ( threadIdx.x < values_left_to_load ) {
             thread_data[FFT::elements_per_thread / 2] = convert_if_needed<FFT, complex_compute_t>(input, (pixel_pitch * index) + blockIdx.y);
         }
-    }
-
-    static inline __device__ void load_c2r_shared_and_pad(const complex_compute_t* __restrict__ input,
-                                                          complex_compute_t* __restrict__ shared_mem,
-                                                          const unsigned int pixel_pitch) {
-        const unsigned int stride = stride_size( );
-        unsigned int       index  = threadIdx.x + (threadIdx.y * size_of<FFT>::value);
-        for ( unsigned int i = 0; i < FFT::elements_per_thread / 2; i++ ) {
-            shared_mem[GetSharedMemPaddedIndex(index)] = input[pixel_pitch * index];
-            index += stride;
-        }
-        constexpr unsigned int threads_per_fft       = cufftdx::size_of<FFT>::value / FFT::elements_per_thread;
-        constexpr unsigned int output_values_to_load = (cufftdx::size_of<FFT>::value / 2) + 1;
-        // threads_per_fft == 1 means that EPT == SIZE, so we need to load one more element
-        constexpr unsigned int values_left_to_load = threads_per_fft == 1 ? 1 : (output_values_to_load % threads_per_fft);
-        if ( threadIdx.x < values_left_to_load ) {
-            shared_mem[GetSharedMemPaddedIndex(index)] = input[pixel_pitch * index];
-        }
-        __syncthreads( );
+#endif
     }
 
     // this may benefit from asynchronous execution
@@ -1078,19 +1080,35 @@ struct io {
     template <typename data_io_t>
     static inline __device__ void store_c2r_reduced(const complex_compute_t* __restrict__ thread_data,
                                                     data_io_t* __restrict__ output) {
+
+#ifdef USE_FOLDED_C2R
+        constexpr auto inner_loop_limit = sizeof(complex_compute_t) / sizeof(data_io_t);
+        unsigned int   index            = (threadIdx.x * inner_loop_limit) + (threadIdx.y * size_of<FFT>::value);
+        if ( threadIdx.y == 0 ) {
+            for ( int i = 0; i < FFT::output_ept; ++i ) {
+                for ( int j = 0; j < inner_loop_limit; ++j ) {
+                    // if ( i * stride * inner_loop_limit + j + threadIdx.x * inner_loop_limit < SignalLength ) {
+                    output[index + j] = convert_if_needed<FFT, data_io_t>(thread_data, i * inner_loop_limit + j);
+                    // }
+                }
+                index += inner_loop_limit * FFT::stride;
+            }
+        }
+
+#else
         if ( threadIdx.y == 0 ) {
             // Finally we write out the first size_of<FFT>::values to global
-            const unsigned int stride = stride_size( );
-            unsigned int       index  = threadIdx.x + (threadIdx.y * size_of<FFT>::value);
+            unsigned int index = threadIdx.x + (threadIdx.y * size_of<FFT>::value);
 
             for ( unsigned int i = 0; i < FFT::elements_per_thread; i++ ) {
                 if ( index < size_of<FFT>::value ) {
                     // transposed index.
                     output[index] = convert_if_needed<FFT, data_io_t>(thread_data, i);
                 }
-                index += stride;
+                index += FFT::stride;
             }
         }
+#endif
     }
 
     template <typename data_io_t>
@@ -1109,28 +1127,52 @@ struct io {
     template <typename data_io_t>
     static inline __device__ void store_c2r(const complex_compute_t* __restrict__ thread_data,
                                             data_io_t* __restrict__ output) {
-        const unsigned int stride = stride_size( );
-        unsigned int       index  = threadIdx.x;
+#ifdef USE_FOLDED_C2R
+        constexpr auto inner_loop_limit = sizeof(complex_compute_t) / sizeof(data_io_t);
+        unsigned int   index            = threadIdx.x * inner_loop_limit;
+        for ( int i = 0; i < FFT::output_ept; ++i ) {
+            for ( int j = 0; j < inner_loop_limit; ++j ) {
+                // if ( i * stride * inner_loop_limit + j + threadIdx.x * inner_loop_limit < SignalLength ) {
+                output[index + j] = convert_if_needed<FFT, data_io_t>(thread_data, i * inner_loop_limit + j);
+                // }
+            }
+            index += inner_loop_limit * FFT::stride;
+        }
+#else
+        unsigned int index = threadIdx.x;
 
         for ( unsigned int i = 0; i < FFT::elements_per_thread; i++ ) {
             output[index] = convert_if_needed<FFT, data_io_t>(thread_data, i);
-            index += stride;
+            index += FFT::stride;
         }
+#endif
     }
 
     template <typename data_io_t>
     static inline __device__ void store_c2r(const complex_compute_t* __restrict__ thread_data,
                                             data_io_t* __restrict__ output,
                                             unsigned int memory_limit) {
-        const unsigned int stride = stride_size( );
-        unsigned int       index  = threadIdx.x;
+#ifdef USE_FOLDED_C2R
+        constexpr auto inner_loop_limit = sizeof(complex_compute_t) / sizeof(data_io_t);
+        unsigned int   index            = threadIdx.x * inner_loop_limit;
+        for ( int i = 0; i < FFT::output_ept; ++i ) {
+            for ( int j = 0; j < inner_loop_limit; ++j ) {
+                // if ( i * stride * inner_loop_limit + j + threadIdx.x * inner_loop_limit < SignalLength ) {
+                output[index + j] = convert_if_needed<FFT, data_io_t>(thread_data, i * inner_loop_limit + j);
+                // }
+            }
+            index += inner_loop_limit * FFT::stride;
+        }
+#else
+        unsigned int index = threadIdx.x;
 
         for ( unsigned int i = 0; i < FFT::elements_per_thread; i++ ) {
             // TODO: does reinterpret_cast<const scalar_compute_t*>(thread_data)[i] make more sense than just thread_data[i].x??
             if ( index < memory_limit )
                 output[index] = convert_if_needed<FFT, data_io_t>(thread_data, i);
-            index += stride;
+            index += FFT::stride;
         }
+#endif
     }
 };
 
