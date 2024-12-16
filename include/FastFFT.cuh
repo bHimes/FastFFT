@@ -24,9 +24,6 @@ inline void static_assert_invalid_loop_limit( ) { static_assert(flag, "loop limi
 
 using namespace cufftdx;
 
-// constexpr const std::map<unsigned int, unsigned int> elements_per_thread = {
-//     {16, 4}, {"GPU", 15}, {"RAM", 20},
-// };
 //////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 // FFT kernels
 //////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -58,25 +55,46 @@ C2C additionally specify direction and may specify an operation.
 
 template <class FFT, class InputData_t, class OutputData_t>
 __launch_bounds__(FFT::max_threads_per_block) __global__
-        void block_fft_kernel_R2C_NONE_XY(const InputData_t* __restrict__ input_values, OutputData_t* __restrict__ output_values, Offsets mem_offsets, typename FFT::workspace_type workspace);
+        void block_fft_kernel_R2C_NONE_XY(const InputData_t* __restrict__ input_values,
+                                          OutputData_t* __restrict__ output_values,
+                                          Offsets                      mem_offsets,
+                                          typename FFT::workspace_type workspace);
 
 // XZ_STRIDE ffts/block via threadIdx.x, notice launch bounds. Creates partial coalescing.
 template <class FFT, class InputData_t, class OutputData_t>
 __launch_bounds__(XZ_STRIDE* FFT::max_threads_per_block) __global__
-        void block_fft_kernel_R2C_NONE_XZ(const InputData_t* __restrict__ input_values, OutputData_t* __restrict__ output_values, Offsets mem_offsets, typename FFT::workspace_type workspace);
+        void block_fft_kernel_R2C_NONE_XZ(const InputData_t* __restrict__ input_values,
+                                          OutputData_t* __restrict__ output_values,
+                                          Offsets                      mem_offsets,
+                                          typename FFT::workspace_type workspace);
 
 template <class FFT, class InputData_t, class OutputData_t>
 __launch_bounds__(FFT::max_threads_per_block) __global__
-        void block_fft_kernel_R2C_INCREASE_XY(const InputData_t* __restrict__ input_values, OutputData_t* __restrict__ output_values, Offsets mem_offsets, float twiddle_in, int Q, typename FFT::workspace_type workspace);
+        void block_fft_kernel_R2C_INCREASE_XY(const InputData_t* __restrict__ input_values,
+                                              OutputData_t* __restrict__ output_values,
+                                              Offsets                      mem_offsets,
+                                              float                        twiddle_in,
+                                              int                          Q,
+                                              typename FFT::workspace_type workspace);
 
 // XZ_STRIDE ffts/block via threadIdx.x, notice launch bounds. Creates partial coalescing.
 template <class FFT, class InputData_t, class OutputData_t>
 __launch_bounds__(XZ_STRIDE* FFT::max_threads_per_block) __global__
-        void block_fft_kernel_R2C_INCREASE_XZ(const InputData_t* __restrict__ input_values, OutputData_t* __restrict__ output_values, Offsets mem_offsets, float twiddle_in, int Q, typename FFT::workspace_type workspace);
+        void block_fft_kernel_R2C_INCREASE_XZ(const InputData_t* __restrict__ input_values,
+                                              OutputData_t* __restrict__ output_values,
+                                              Offsets                      mem_offsets,
+                                              float                        twiddle_in,
+                                              int                          Q,
+                                              typename FFT::workspace_type workspace);
 
 // __launch_bounds__(FFT::max_threads_per_block)  we don't know this because it is threadDim.x * threadDim.z - this could be templated if it affects performance significantly
 template <class FFT, class InputData_t, class OutputData_t>
-__global__ void block_fft_kernel_R2C_DECREASE_XY(const InputData_t* __restrict__ input_values, OutputData_t* __restrict__ output_values, Offsets mem_offsets, float twiddle_in, int Q, typename FFT::workspace_type workspace);
+__global__ void block_fft_kernel_R2C_DECREASE_XY(const InputData_t* __restrict__ input_values,
+                                                 OutputData_t* __restrict__ output_values,
+                                                 Offsets                      mem_offsets,
+                                                 float                        twiddle_in,
+                                                 int                          Q,
+                                                 typename FFT::workspace_type workspace);
 
 /////////////
 // C2C
@@ -84,41 +102,83 @@ __global__ void block_fft_kernel_R2C_DECREASE_XY(const InputData_t* __restrict__
 
 template <class FFT, class ComplexData_t>
 __launch_bounds__(FFT::max_threads_per_block) __global__
-        void block_fft_kernel_C2C_INCREASE(const ComplexData_t* __restrict__ input_values, ComplexData_t* __restrict__ output_values, Offsets mem_offsets, float twiddle_in, int Q, typename FFT::workspace_type workspace);
+        void block_fft_kernel_C2C_INCREASE(const ComplexData_t* __restrict__ input_values,
+                                           ComplexData_t* __restrict__ output_values,
+                                           Offsets                      mem_offsets,
+                                           float                        twiddle_in,
+                                           int                          Q,
+                                           typename FFT::workspace_type workspace);
 
 // __launch_bounds__(FFT::max_threads_per_block)  we don't know this because it is threadDim.x * threadDim.z - this could be templated if it affects performance significantly
 template <class FFT, class ComplexData_t>
-__global__ void block_fft_kernel_C2C_DECREASE(const ComplexData_t* __restrict__ input_values, ComplexData_t* __restrict__ output_values, Offsets mem_offsets, float twiddle_in, int Q, typename FFT::workspace_type workspace);
+__global__ void block_fft_kernel_C2C_DECREASE(const ComplexData_t* __restrict__ input_values,
+                                              ComplexData_t* __restrict__ output_values,
+                                              Offsets                      mem_offsets,
+                                              float                        twiddle_in,
+                                              int                          Q,
+                                              typename FFT::workspace_type workspace);
 
 template <class FFT, class ComplexData_t>
 __launch_bounds__(FFT::max_threads_per_block) __global__
-        void block_fft_kernel_C2C_WithPadding_SwapRealSpaceQuadrants(const ComplexData_t* __restrict__ input_values, ComplexData_t* __restrict__ output_values, Offsets mem_offsets, float twiddle_in, int Q, typename FFT::workspace_type workspace);
+        void block_fft_kernel_C2C_WithPadding_SwapRealSpaceQuadrants(const ComplexData_t* __restrict__ input_values,
+                                                                     ComplexData_t* __restrict__ output_values,
+                                                                     Offsets                      mem_offsets,
+                                                                     float                        twiddle_in,
+                                                                     int                          Q,
+                                                                     typename FFT::workspace_type workspace);
 
 template <class ExternalImage_t, class FFT, class invFFT, class ComplexData_t, class PreOpType, class IntraOpType, class PostOpType>
 __launch_bounds__(FFT::max_threads_per_block) __global__
-        void block_fft_kernel_C2C_FWD_INCREASE_OP_INV_NONE(const ExternalImage_t* __restrict__ image_to_search, const ComplexData_t* __restrict__ input_values, ComplexData_t* __restrict__ output_values,
-                                                           Offsets mem_offsets, int Q, typename FFT::workspace_type workspace_fwd, typename invFFT::workspace_type workspace_inv,
-                                                           PreOpType pre_op_functor, IntraOpType intra_op_functor, PostOpType post_op_functor);
+        void block_fft_kernel_C2C_FWD_INCREASE_OP_INV_NONE(const ExternalImage_t* __restrict__ image_to_search,
+                                                           const ComplexData_t* __restrict__ input_values,
+                                                           ComplexData_t* __restrict__ output_values,
+                                                           Offsets                         mem_offsets,
+                                                           int                             Q,
+                                                           typename FFT::workspace_type    workspace_fwd,
+                                                           typename invFFT::workspace_type workspace_inv,
+                                                           PreOpType                       pre_op_functor,
+                                                           IntraOpType                     intra_op_functor,
+                                                           PostOpType                      post_op_functor);
 
 template <class ExternalImage_t, class FFT, class invFFT, class ComplexData_t>
-__global__ void block_fft_kernel_C2C_FWD_NONE_INV_DECREASE_ConjMul(const ExternalImage_t* __restrict__ image_to_search, const ComplexData_t* __restrict__ input_values, ComplexData_t* __restrict__ output_values,
-                                                                   Offsets mem_offsets, float twiddle_in, int Q, typename FFT::workspace_type workspace_fwd, typename invFFT::workspace_type workspace_inv);
+__global__ void block_fft_kernel_C2C_FWD_NONE_INV_DECREASE_ConjMul(const ExternalImage_t* __restrict__ image_to_search,
+                                                                   const ComplexData_t* __restrict__ input_values,
+                                                                   ComplexData_t* __restrict__ output_values,
+                                                                   Offsets                         mem_offsets,
+                                                                   float                           twiddle_in,
+                                                                   int                             Q,
+                                                                   typename FFT::workspace_type    workspace_fwd,
+                                                                   typename invFFT::workspace_type workspace_inv);
 
 template <class FFT, class ComplexData_t>
 __launch_bounds__(FFT::max_threads_per_block) __global__
-        void block_fft_kernel_C2C_NONE(const ComplexData_t* __restrict__ input_values, ComplexData_t* __restrict__ output_values, Offsets mem_offsets, typename FFT::workspace_type workspace);
+        void block_fft_kernel_C2C_NONE(const ComplexData_t* __restrict__ input_values,
+                                       ComplexData_t* __restrict__ output_values,
+                                       Offsets                      mem_offsets,
+                                       typename FFT::workspace_type workspace);
 
 template <class FFT, class ComplexData_t>
 __launch_bounds__(XZ_STRIDE* FFT::max_threads_per_block) __global__
-        void block_fft_kernel_C2C_NONE_XZ(const ComplexData_t* __restrict__ input_values, ComplexData_t* __restrict__ output_values, Offsets mem_offsets, typename FFT::workspace_type workspace);
+        void block_fft_kernel_C2C_NONE_XZ(const ComplexData_t* __restrict__ input_values,
+                                          ComplexData_t* __restrict__ output_values,
+                                          Offsets                      mem_offsets,
+                                          typename FFT::workspace_type workspace);
 
 template <class FFT, class ComplexData_t>
 __launch_bounds__(XZ_STRIDE* FFT::max_threads_per_block) __global__
-        void block_fft_kernel_C2C_NONE_XYZ(const ComplexData_t* __restrict__ input_values, ComplexData_t* __restrict__ output_values, Offsets mem_offsets, typename FFT::workspace_type workspace);
+        void block_fft_kernel_C2C_NONE_XYZ(const ComplexData_t* __restrict__ input_values,
+                                           ComplexData_t* __restrict__ output_values,
+                                           Offsets                      mem_offsets,
+                                           typename FFT::workspace_type workspace);
 
 template <class FFT, class ComplexData_t>
 __launch_bounds__(XZ_STRIDE* FFT::max_threads_per_block) __global__
-        void block_fft_kernel_C2C_INCREASE_XYZ(const ComplexData_t* __restrict__ input_values, ComplexData_t* __restrict__ output_values, Offsets mem_offsets, float twiddle_in, int Q, typename FFT::workspace_type workspace);
+        void block_fft_kernel_C2C_INCREASE_XYZ(const ComplexData_t* __restrict__ input_values,
+                                               ComplexData_t* __restrict__ output_values,
+                                               Offsets                      mem_offsets,
+                                               float                        twiddle_in,
+                                               int                          Q,
+                                               typename FFT::workspace_type workspace);
 
 /////////////
 // C2R
@@ -126,18 +186,31 @@ __launch_bounds__(XZ_STRIDE* FFT::max_threads_per_block) __global__
 
 template <class FFT, class InputData_t, class OutputData_t>
 __launch_bounds__(FFT::max_threads_per_block) __global__
-        void block_fft_kernel_C2R_NONE(const InputData_t* __restrict__ input_values, OutputData_t* __restrict__ output_values, Offsets mem_offsets, typename FFT::workspace_type workspace);
+        void block_fft_kernel_C2R_NONE(const InputData_t* __restrict__ input_values,
+                                       OutputData_t* __restrict__ output_values,
+                                       Offsets                      mem_offsets,
+                                       typename FFT::workspace_type workspace);
 
 template <class FFT, class InputData_t, class OutputData_t>
 __launch_bounds__(FFT::max_threads_per_block) __global__
-        void block_fft_kernel_C2R_NONE_XY(const InputData_t* __restrict__ input_values, OutputData_t* __restrict__ output_values, Offsets mem_offsets, typename FFT::workspace_type workspace);
+        void block_fft_kernel_C2R_NONE_XY(const InputData_t* __restrict__ input_values,
+                                          OutputData_t* __restrict__ output_values,
+                                          Offsets                      mem_offsets,
+                                          typename FFT::workspace_type workspace);
 
 // __launch_bounds__(FFT::max_threads_per_block)  we don't know this because it is threadDim.x * threadDim.z - this could be templated if it affects performance significantly
 template <class FFT, class InputData_t, class OutputData_t>
-__global__ void block_fft_kernel_C2R_DECREASE_XY(const InputData_t* __restrict__ input_values, OutputData_t* __restrict__ output_values, Offsets mem_offsets, const float twiddle_in, const unsigned int Q, typename FFT::workspace_type workspace);
+__global__ void block_fft_kernel_C2R_DECREASE_XY(const InputData_t* __restrict__ input_values,
+                                                 OutputData_t* __restrict__ output_values,
+                                                 Offsets                      mem_offsets,
+                                                 float                        twiddle_in,
+                                                 int                          Q,
+                                                 typename FFT::workspace_type workspace);
 
 template <class InputType, class OutputBaseType>
-__global__ void clip_into_top_left_kernel(InputType* input_values, OutputBaseType* output_values, const short4 dims);
+__global__ void clip_into_top_left_kernel(InputType*      input_values,
+                                          OutputBaseType* output_values,
+                                          const short4    dims);
 
 // Modified from GpuImage::ClipIntoRealKernel
 template <typename InputType, typename OutputBaseType>

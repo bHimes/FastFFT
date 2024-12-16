@@ -6,15 +6,15 @@
 
 namespace FastFFT {
 
-template <class FFT>
-constexpr float exp_i2pi_P( ) {
+template <class FFT, typename T>
+constexpr T _i2pi_P( ) {
     // This is the twiddle factor for the FULL xform, which uses float(-2.0 * pi_v<double> / double(transform_size.N));
     // We only know P = N/Q at compile time, but it still makes sense to calculate this.
     if constexpr ( cufftdx::direction_of<FFT>::value == cufftdx::fft_direction::forward ) {
-        return float(-2.0 * pi_v<double> / double(cufftdx::size_of<FFT>::value));
+        return T{-2.0 * pi_v<double> / double(cufftdx::size_of<FFT>::value)};
     }
     else {
-        return float(2.0 * pi_v<double> / double(cufftdx::size_of<FFT>::value));
+        return T{2.0 * pi_v<double> / double(cufftdx::size_of<FFT>::value)};
     }
 }
 
