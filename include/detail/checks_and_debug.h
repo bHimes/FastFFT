@@ -146,6 +146,15 @@ inline void PrintVectorType(short4 input) {
     std::cerr << "(x,y,z,w) " << input.x << " " << input.y << " " << input.z << " " << input.w << std::endl;
 }
 
+template <bool flag = false>
+inline void static_fail_for_size_on_check_for_max_tpb( ) { static_assert(flag, "static check max theads per block for size"); }
+
+template <unsigned int SizeValue, unsigned int WantedSizeValue, unsigned int max_threads_per_block>
+constexpr __inline__ void get_threads_per_block( ) {
+    if constexpr ( WantedSizeValue == SizeValue )
+        static_fail_for_size_on_check_for_max_tpb( );
+};
+
 } // namespace FastFFT
 
 #endif

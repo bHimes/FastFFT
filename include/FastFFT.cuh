@@ -2,6 +2,7 @@
 #include "FastFFT.h"
 
 // #define USE_FOLDED_R2C_C2R
+// #define USE_FOLDED_C2R
 
 #ifndef __INCLUDE_FAST_FFT_CUH__
 #define __INCLUDE_FAST_FFT_CUH__
@@ -17,6 +18,9 @@
 //FIXME: change to constexpr func
 
 namespace FastFFT {
+
+template <bool flag = false>
+inline void static_assert_invalid_loop_limit( ) { static_assert(flag, "loop limit lt 1"); }
 
 using namespace cufftdx;
 

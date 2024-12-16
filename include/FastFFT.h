@@ -15,6 +15,11 @@
 // Inv 5, 6, 7 ( original y, z, x)
 // Defined in make by setting environmental variable  FFT_DEBUG_STAGE
 
+// #define FastFFT_build_sizes 32, 64, 128, 256, 512, 1024, 2048, 4096
+
+// #define FastFFT_build_sizes 16, 4, 32, 8, 64, 8, 128, 8, 256, 8, 512, 8, 1024, 8, 2048, 8, 4096, 16, 8192, 16
+#define FastFFT_build_sizes 512, 8, 2048, 8
+
 namespace FastFFT {
 
 // TODO: this may be expanded, for now it is to be used in the case where we have
@@ -31,6 +36,9 @@ inline void static_no_half_support_yet( ) { static_assert(flag, "no __half suppo
 
 template <bool flag = false>
 inline void static_no_thread_fft_support_yet( ) { static_assert(flag, "only block ffts are supported"); }
+
+template <bool flag = false>
+inline void static_FIXME_maybe_broken( ) { static_assert(flag, "this branch is not confirmed to be working properly."); }
 
 // Currently the buffer types match the input type which also determines the output type.
 // The compute and otherImage type are independent.
@@ -344,7 +352,8 @@ class FourierTransformer {
     SizeChangeType::Enum fwd_size_change_type;
     SizeChangeType::Enum inv_size_change_type;
 
-    bool implicit_dimension_change;
+    bool fwd_implicit_dimension_change;
+    bool inv_implicit_dimension_change;
 
     int transform_stage_completed;
 
@@ -416,7 +425,6 @@ class FourierTransformer {
         std::cerr << "  Grid dimensions: ";
         PrintVectorType(LP.gridDims);
         std::cerr << "  Q: " << LP.Q << std::endl;
-        std::cerr << "  Twiddle in: " << LP.twiddle_in << std::endl;
         std::cerr << "  shared input: " << LP.mem_offsets.shared_input << std::endl;
         std::cerr << "  shared output (memlimit in r2c): " << LP.mem_offsets.shared_output << std::endl;
         std::cerr << "  physical_x_input: " << LP.mem_offsets.physical_x_input << std::endl;
@@ -462,6 +470,8 @@ class FourierTransformer {
 
     // FIXME: in the execution blocks, we should have some check that the correct direction is implemented.
     // Or better yet, have this templated and
+    // TODO: we could make this not a vector and constexpr initialization of the size pretty easily FIXME
+    std::vector<int> sizes_in_this_build = {FastFFT_build_sizes};
 
     enum KernelType { r2c_none_XY, // 1d fwd  //  2d fwd 1st stage
                       r2c_none_XZ, // 3d fwd 1st stage

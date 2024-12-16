@@ -19,7 +19,8 @@ std::vector<int> test_size_3d        = {32, 64, 128, 256, 512};
 // For now, just over-ride these small sizes
 std::vector<int> test_size_for_decrease = {64, 128, 256, 512, 1024, 2048, 4096};
 
-void CheckInputArgs(int argc, char** argv, const std::string_view& text_line, bool& run_2d_unit_tests, bool& run_3d_unit_tests) {
+std::array<std::vector<int>, 4> CheckInputArgs(int argc, char** argv, const std::string_view& text_line, bool& run_2d_unit_tests, bool& run_3d_unit_tests) {
+
     switch ( argc ) {
         case 1: {
             std::cout << "Running all tests" << std::endl;
@@ -48,11 +49,31 @@ void CheckInputArgs(int argc, char** argv, const std::string_view& text_line, bo
             }
             break;
         }
+        case 3: {
+            std::cout << "Running all tests" << std::endl;
+            run_2d_unit_tests = true;
+            run_3d_unit_tests = true;
+
+            int test_size_1, test_size_2;
+            try {
+                test_size_1 = std::stoi(argv[1]);
+                test_size_2 = std::stoi(argv[2]);
+            } catch ( std::invalid_argument& e ) {
+                std::cout << "Usage: " << argv[0] << " < --all (default w/ no arg), --2d, --3d or min/max test size ints>" << std::endl;
+                std::exit(0);
+            }
+            // Might be worth checking on valid sizes though
+            test_size = {std::min(test_size_1, test_size_2), std::max(test_size_1, test_size_2)};
+            std::cout << "Running tests from " << test_size[0] << " to " << test_size[1] << std::endl;
+            return {test_size, test_size, test_size, test_size};
+            break;
+        }
         default: {
             std::cout << "Usage: " << argv[0] << " < --all (default w/ no arg), --2d, --3d>" << std::endl;
             std::exit(0);
         }
     };
+    return {test_size, test_size_rectangle, test_size_3d, test_size_for_decrease};
 };
 
 } // namespace FastFFT

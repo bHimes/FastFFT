@@ -237,7 +237,7 @@ int main(int argc, char** argv) {
 
     if ( run_2d_unit_tests ) {
         constexpr bool start_with_fp16 = false;
-        constexpr bool start_with_fp32 = ! start_with_fp16;
+        // constexpr bool start_with_fp32 = ! start_with_fp16;
         // Test 4 is failing, I suspect it is a data movement issue
         if ( ! const_image_test<2, start_with_fp16>(FastFFT::test_size) )
             return 1;
@@ -245,11 +245,13 @@ int main(int argc, char** argv) {
         //     return 1;
     }
 
+#ifdef FastFFT_3d_instantiation
     if ( run_3d_unit_tests ) {
         // if ( ! const_image_test<3, false>(FastFFT::test_size_3d) )
         //     return 1;
         // if (! unit_impulse_test(test_size_3d, true, true)) return 1;
     }
+#endif
 
     return 0;
 };

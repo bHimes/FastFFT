@@ -311,7 +311,7 @@ void compare_libraries(std::vector<int> size, FastFFT::SizeChangeType::Enum size
             cuFFT_output.record_stop( );
             cuFFT_output.synchronize( );
             cuFFT_output.print_time("FastFFT", print_out_time);
-            
+
             float FastFFT_time = cuFFT_output.elapsed_gpu_ms;
 
             if ( set_conjMult_callback ) {
@@ -319,15 +319,14 @@ void compare_libraries(std::vector<int> size, FastFFT::SizeChangeType::Enum size
                 cuFFT_output.SetComplexConjMultiplyAndLoadCallBack((cufftComplex*)cuFFT_buffer, 1.0f);
                 postcheck;
             }
-            
 
             if ( ! skip_cufft_for_profiling ) {
                 //////////////////////////////////////////
                 //////////////////////////////////////////
                 // Warm up and check for accuracy
-                
+
                 if ( is_size_change_decrease ) {
-                    
+
                     precheck;
                     cudaErr(cufftExecR2C(cuFFT_input.cuda_plan_forward, (cufftReal*)cuFFT_buffer, (cufftComplex*)cuFFT_buffer));
                     postcheck;
@@ -340,7 +339,7 @@ void compare_libraries(std::vector<int> size, FastFFT::SizeChangeType::Enum size
                     // cuFFT.ClipIntoTopLeft();
                     // cuFFT.ClipIntoReal(cuFFT_output.size.x/2, cuFFT_output.size.y/2, cuFFT_output.size.z/2);
                     // cuFFT.CopyDeviceToHostAndSynchronize(cuFFT_output.real_values,false);
-                    
+
                     precheck;
                     cudaErr(cufftExecR2C(cuFFT_output.cuda_plan_forward, (cufftReal*)cuFFT_buffer, (cufftComplex*)cuFFT_buffer));
                     postcheck;
@@ -349,7 +348,7 @@ void compare_libraries(std::vector<int> size, FastFFT::SizeChangeType::Enum size
                     cudaErr(cufftExecC2R(cuFFT_output.cuda_plan_inverse, (cufftComplex*)cuFFT_buffer, (cufftReal*)cuFFT_buffer));
                     postcheck;
                 }
-                
+
                 cuFFT_output.record_start( );
                 for ( int i = 0; i < n_loops; ++i ) {
                     // std::cout << i << "i / " << n_loops << "n_loops" << std::endl;
@@ -376,13 +375,12 @@ void compare_libraries(std::vector<int> size, FastFFT::SizeChangeType::Enum size
                         postcheck;
                     }
                 }
-                
+
                 cuFFT_output.record_stop( );
                 cuFFT_output.synchronize( );
                 cuFFT_output.print_time("cuFFT", print_out_time);
-                
+
             } // end of if (! skip_cufft_for_profiling)
-            
 
             std::cout << "For size " << input_size.x << " to " << output_size.x << ": ";
             std::cout << "Ratio cuFFT/FastFFT : " << cuFFT_output.elapsed_gpu_ms / FastFFT_time << "\n\n"
@@ -408,8 +406,8 @@ int main(int argc, char** argv) {
     bool run_2d_performance_tests = false;
     bool run_3d_performance_tests = false;
 
-    const std::string_view text_line = "simple convolution";
-    FastFFT::CheckInputArgs(argc, argv, text_line, run_2d_performance_tests, run_3d_performance_tests);
+    const std::string_view          text_line = "simple convolution";
+    std::array<std::vector<int>, 4> test_size = FastFFT::CheckInputArgs(argc, argv, text_line, run_2d_performance_tests, run_3d_performance_tests);
 
     // TODO: size decrease
     if ( run_2d_performance_tests ) {
@@ -420,18 +418,19 @@ int main(int argc, char** argv) {
 #endif
         SCT size_change_type;
         // Set the SCT to no_change, increase, or decrease
-        size_change_type = SCT::no_change;
-        compare_libraries<2>(FastFFT::test_size, size_change_type, false);
-        // compare_libraries<2>(test_size_rectangle, do_3d, size_change_type, true);
+        // size_change_type = SCT::no_change;
+        // compare_libraries<2>(FastFFT::test_size, size_change_type, false);
+        // // compare_libraries<2>(test_size_rectangle, do_3d, size_change_type, true);
 
         size_change_type = SCT::increase;
-        compare_libraries<2>(FastFFT::test_size, size_change_type, false);
+        compare_libraries<2>(test_size.at(0), size_change_type, false);
         // compare_libraries<2>(test_size_rectangle, do_3d, size_change_type, true);
 
-        size_change_type = SCT::decrease;
-        compare_libraries<2>(FastFFT::test_size, size_change_type, false);
+        // size_change_type = SCT::decrease;
+        // compare_libraries<2>(FastFFT::test_size, size_change_type, false);
     }
 
+#ifdef FastFFT_3d_instantiation
     if ( run_3d_performance_tests ) {
 #ifdef HEAVYERRORCHECKING_FFT
         std::cout << "Running performance tests with heavy error checking.\n";
@@ -450,6 +449,7 @@ int main(int argc, char** argv) {
         // size_change_type = SCT::decrease;
         // compare_libraries(FastFFT::test_size, do_3d, size_change_type, false);
     }
+#endif
 
     return 0;
 };

@@ -11,7 +11,7 @@ NVCC_FLAGS+=--expt-relaxed-constexpr
 NVCC_FLAGS+=-DCUFFTDX_DISABLE_RUNTIME_ASSERTS
 
 # Don't explicitly instantiate the 3d versions unless requested
-NVCC_FLAGS+=-DFastFFT_3d_instantiation
+# NVCC_FLAGS+=-DFastFFT_3d_instantiation
 NVCC_FLAGS+=-DCUFFTDX_DISABLE_CUTLASS_DEPENDENCY
 
 # Gencode arguments, only supporting Volta or newer
@@ -19,14 +19,30 @@ NVCC_FLAGS+=-DCUFFTDX_DISABLE_CUTLASS_DEPENDENCY
 # In initial dev, only compile for 70 or 86 depending on which workstation I'm on, b/c it is faster.
 SMS ?=  86
 
-ifeq (${FastFFT_lto},1)
-$(info "Building with LTO")
-GENCODE_FLAGS := -gencode arch=compute_86,code=lto_86
+
+ifeq (${minBlocksPerMultiprocessor},)
 else
-$(info "Building without LTO")
-GENCODE_FLAGS := -gencode arch=compute_86,code=sm_86
+NVCC_FLAGS+=-DminBlocksPerMultiprocessor=${minBlocksPerMultiprocessor}
+$(info "setting minBlocksPerMultiprocessor to [${minBlocksPerMultiprocessor}]")
+endif 
+
+ifeq (${c2r_multiplier},)
+else
+NVCC_FLAGS+=-Dc2r_multiplier=${c2r_multiplier}
+$(info "setting c2r_multiplier to [${c2r_multiplier}]")
 endif
 
+# ifeq (${FastFFT_lto},1)
+# $(info "Building with LTO")
+# GENCODE_FLAGS := -gencode arch=compute_86,code=lto_86
+# else
+# $(info "Building without LTO")
+# GENCODE_FLAGS := -gencode arch=compute_86,code=sm_86
+# endif
+
+# GENCODE_FLAGS := --gpu-architecture=sm_86 -gencode=arch=compute_86,code=compute_86 -gencode=arch=compute_80,code=sm_80 -gencode=arch=compute_89,code=sm_89
+GENCODE_FLAGS := --gpu-architecture=sm_86 -gencode=arch=compute_86,code=compute_86
+# NVCC_FLAGS+=-DFastFFT_sizes=512,4096
 
 # TODO:
 # Lets first clean this up to have several targets, one for the library, one for the tests and move the helper Image object to the tests.
