@@ -147,7 +147,6 @@ FastFFT::PrintLaunchParameters()
     std::cout << "  Grid dimensions: ";
     PrintVectorType(LP.gridDims);
     std::cout << "  Q: " << LP.Q << std::endl;
-    std::cout << "  Twiddle in: " << LP.twiddle_in << std::endl;
     std::cout << "  shared input: " << LP.mem_offsets.shared_input << std::endl;
     std::cout << "  shared output (memlimit in r2c): " << LP.mem_offsets.shared_output << std::endl;
     std::cout << "  physical_x_input: " << LP.mem_offsets.physical_x_input << std::endl;
