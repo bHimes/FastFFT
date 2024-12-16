@@ -1669,77 +1669,33 @@ void FourierTransformer<ComputeBaseType, InputType, OtherImageType, Rank>::SetIn
                                                                                                    IntraOpType     intra_op_functor,
                                                                                                    PostOpType      post_op_functor) {
 
-    if constexpr ( ! detail::has_any_block_operator<FFT_base>::value ) {
-        // SelectSizeAndType<FFT, PreOpType, IntraOpType, PostOpType>(kernel_type,  pre_op_functor, intra_op_functor, post_op_functor);
-    }
-    else {
-        if constexpr ( Rank == 3 ) {
-            SelectSizeAndType<FFT_ALGO_t, FFT_base, PreOpType, IntraOpType, PostOpType, 16, 4, 32, 8, 64, 8, 128, 8, 256, 8, 512, 8>(other_image_ptr, kernel_type, pre_op_functor, intra_op_functor, post_op_functor);
-        }
-        else {
-            // TODO: 8192 will fail for sm75 if wanted need some extra logic ... , 8192, 16
-            SelectSizeAndType<FFT_ALGO_t, FFT_base, PreOpType, IntraOpType, PostOpType, FastFFT_build_sizes>(other_image_ptr, kernel_type, pre_op_functor, intra_op_functor, post_op_functor);
-        }
-    }
+    SelectSizeAndType<FFT_ALGO_t, FFT_base, PreOpType, IntraOpType, PostOpType, FastFFT_build_sizes>(other_image_ptr, kernel_type, pre_op_functor, intra_op_functor, post_op_functor);
 }
 
 template <class ComputeBaseType, class InputType, class OtherImageType, int Rank>
-template <int FFT_ALGO_t, class FFT_base, class PreOpType, class IntraOpType, class PostOpType>
+template <int FFT_ALGO_t, class FFT_base, class PreOpType, class IntraOpType, class PostOpType, unsigned int... SizeValues>
 void FourierTransformer<ComputeBaseType, InputType, OtherImageType, Rank>::SelectSizeAndType(OtherImageType* other_image_ptr,
                                                                                              KernelType      kernel_type,
                                                                                              PreOpType       pre_op_functor,
                                                                                              IntraOpType     intra_op_functor,
                                                                                              PostOpType      post_op_functor) {
-    // This provides both a termination point for the recursive version needed for the block transform case as well as the actual function for thread transform with fixed size 32
-    GetTransformSize(kernel_type);
-    if constexpr ( ! detail::has_any_block_operator<FFT_base>::value ) {
-        SetEptForUseInLaunchParameters(8);
-        switch ( device_properties.device_arch ) {
-            case 700: {
-                using FFT = decltype(FFT_base( ) + SM<700>( ) + ElementsPerThread<8>( ));
-                SetAndLaunchKernel<FFT_ALGO_t, FFT, PreOpType, IntraOpType, PostOpType>(other_image_ptr, kernel_type, pre_op_functor, intra_op_functor, post_op_functor);
-                break;
-            }
-            case 750: {
-                using FFT = decltype(FFT_base( ) + SM<750>( ) + ElementsPerThread<8>( ));
-                SetAndLaunchKernel<FFT_ALGO_t, FFT, PreOpType, IntraOpType, PostOpType>(other_image_ptr, kernel_type, pre_op_functor, intra_op_functor, post_op_functor);
-                break;
-            }
-            case 800: {
-                using FFT = decltype(FFT_base( ) + SM<800>( ) + ElementsPerThread<8>( ));
-                SetAndLaunchKernel<FFT_ALGO_t, FFT, PreOpType, IntraOpType, PostOpType>(other_image_ptr, kernel_type, pre_op_functor, intra_op_functor, post_op_functor);
-                break;
-            }
-            case 860: {
-                using FFT = decltype(FFT_base( ) + SM<700>( ) + ElementsPerThread<8>( ));
-                SetAndLaunchKernel<FFT_ALGO_t, FFT, PreOpType, IntraOpType, PostOpType>(other_image_ptr, kernel_type, pre_op_functor, intra_op_functor, post_op_functor);
-                break;
-            }
-            case 890: {
-                // FIXME: on migrating to cufftDx 1.1.1
-                using FFT = decltype(FFT_base( ) + SM<700>( ) + ElementsPerThread<8>( ));
-                SetAndLaunchKernel<FFT_ALGO_t, FFT, PreOpType, IntraOpType, PostOpType>(other_image_ptr, kernel_type, pre_op_functor, intra_op_functor, post_op_functor);
-                break;
-            }
-            default: {
-                MyFFTRunTimeAssertTrue(false, "Unsupported architecture" + std::to_string(device_properties.device_arch));
-                break;
-            }
-        }
-    }
+
+    (SelectSizeAndTypeWithFold<FFT_ALGO_t, FFT_base, PreOpType, IntraOpType, PostOpType, SizeValues>(other_image_ptr, kernel_type, pre_op_functor, intra_op_functor, post_op_functor), ...);
 }
 
-// TODO: see if you can replace this with a fold expression?
 template <class ComputeBaseType, class InputType, class OtherImageType, int Rank>
-template <int FFT_ALGO_t, class FFT_base, class PreOpType, class IntraOpType, class PostOpType, unsigned int SizeValue, unsigned int Ept, unsigned int... OtherValues>
-void FourierTransformer<ComputeBaseType, InputType, OtherImageType, Rank>::SelectSizeAndType(OtherImageType* other_image_ptr,
-                                                                                             KernelType      kernel_type,
-                                                                                             PreOpType       pre_op_functor,
-                                                                                             IntraOpType     intra_op_functor,
-                                                                                             PostOpType      post_op_functor) {
+template <int FFT_ALGO_t, class FFT_base, class PreOpType, class IntraOpType, class PostOpType, unsigned int SizeValue>
+void FourierTransformer<ComputeBaseType, InputType, OtherImageType, Rank>::SelectSizeAndTypeWithFold(OtherImageType* other_image_ptr,
+                                                                                                     KernelType      kernel_type,
+                                                                                                     PreOpType       pre_op_functor,
+                                                                                                     IntraOpType     intra_op_functor,
+                                                                                                     PostOpType      post_op_functor) {
+
     // Use recursion to step through the allowed sizes.
     GetTransformSize(kernel_type);
 
+    constexpr unsigned int Ept = SizeValue == 16 ? 4 : SizeValue < 4096 ? 8
+                                                                        : 16;
     // Note: the size of the input/output may not match the size of the transform, i.e. transform_size.L <= transform_size.P
     if ( SizeValue == transform_size.P ) {
         switch ( device_properties.device_arch ) {
@@ -1751,6 +1707,7 @@ void FourierTransformer<ComputeBaseType, InputType, OtherImageType, Rank>::Selec
             }
             case 750: {
                 SetEptForUseInLaunchParameters(Ept);
+
                 if constexpr ( SizeValue <= 4096 ) {
                     using FFT = decltype(FFT_base( ) + Size<SizeValue>( ) + SM<750>( ) + ElementsPerThread<Ept>( ));
                     SetAndLaunchKernel<FFT_ALGO_t, FFT, PreOpType, IntraOpType, PostOpType>(other_image_ptr, kernel_type, pre_op_functor, intra_op_functor, post_op_functor);
@@ -1759,24 +1716,27 @@ void FourierTransformer<ComputeBaseType, InputType, OtherImageType, Rank>::Selec
             }
             case 800: {
                 SetEptForUseInLaunchParameters(Ept);
+
                 using FFT = decltype(FFT_base( ) + Size<SizeValue>( ) + SM<800>( ) + ElementsPerThread<Ept>( ));
                 SetAndLaunchKernel<FFT_ALGO_t, FFT, PreOpType, IntraOpType, PostOpType>(other_image_ptr, kernel_type, pre_op_functor, intra_op_functor, post_op_functor);
                 break;
             }
             case 860: {
+                SetEptForUseInLaunchParameters(Ept);
+
                 // TODO: confirm that this is needed (over 860) which at the time just redirects to 700
                 //       if maintining this, we could save some time on compilation by combining with the 700 case
-                SetEptForUseInLaunchParameters(Ept);
                 using FFT = decltype(FFT_base( ) + Size<SizeValue>( ) + SM<700>( ) + ElementsPerThread<Ept>( ));
                 SetAndLaunchKernel<FFT_ALGO_t, FFT, PreOpType, IntraOpType, PostOpType>(other_image_ptr, kernel_type, pre_op_functor, intra_op_functor, post_op_functor);
                 break;
             }
             case 890: {
+                SetEptForUseInLaunchParameters(Ept);
+
                 // TODO: confirm that this is needed (over 860) which at the time just redirects to 700
                 //       if maintining this, we could save some time on compilation by combining with the 700 case
                 // FIXME: on migrating to cufftDx 1.1.1
 
-                SetEptForUseInLaunchParameters(Ept);
                 using FFT = decltype(FFT_base( ) + Size<SizeValue>( ) + SM<700>( ) + ElementsPerThread<Ept>( ));
                 SetAndLaunchKernel<FFT_ALGO_t, FFT, PreOpType, IntraOpType, PostOpType>(other_image_ptr, kernel_type, pre_op_functor, intra_op_functor, post_op_functor);
                 break;
@@ -1787,9 +1747,69 @@ void FourierTransformer<ComputeBaseType, InputType, OtherImageType, Rank>::Selec
             }
         }
     }
-
-    SelectSizeAndType<FFT_ALGO_t, FFT_base, PreOpType, IntraOpType, PostOpType, OtherValues...>(other_image_ptr, kernel_type, pre_op_functor, intra_op_functor, post_op_functor);
 }
+
+// // TODO: see if you can replace this with a fold expression?
+// template <class ComputeBaseType, class InputType, class OtherImageType, int Rank>
+// template <int FFT_ALGO_t, class FFT_base, class PreOpType, class IntraOpType, class PostOpType, unsigned int SizeValue, unsigned int Ept, unsigned int... OtherValues>
+// void FourierTransformer<ComputeBaseType, InputType, OtherImageType, Rank>::SelectSizeAndType(OtherImageType* other_image_ptr,
+//                                                                                              KernelType      kernel_type,
+//                                                                                              PreOpType       pre_op_functor,
+//                                                                                              IntraOpType     intra_op_functor,
+//                                                                                              PostOpType      post_op_functor) {
+//     // Use recursion to step through the allowed sizes.
+//     GetTransformSize(kernel_type);
+
+//     // Note: the size of the input/output may not match the size of the transform, i.e. transform_size.L <= transform_size.P
+//     if ( SizeValue == transform_size.P ) {
+//         switch ( device_properties.device_arch ) {
+//             case 700: {
+//                 SetEptForUseInLaunchParameters(Ept);
+//                 using FFT = decltype(FFT_base( ) + Size<SizeValue>( ) + SM<700>( ) + ElementsPerThread<Ept>( ));
+//                 SetAndLaunchKernel<FFT_ALGO_t, FFT, PreOpType, IntraOpType, PostOpType>(other_image_ptr, kernel_type, pre_op_functor, intra_op_functor, post_op_functor);
+//                 break;
+//             }
+//             case 750: {
+//                 SetEptForUseInLaunchParameters(Ept);
+//                 if constexpr ( SizeValue <= 4096 ) {
+//                     using FFT = decltype(FFT_base( ) + Size<SizeValue>( ) + SM<750>( ) + ElementsPerThread<Ept>( ));
+//                     SetAndLaunchKernel<FFT_ALGO_t, FFT, PreOpType, IntraOpType, PostOpType>(other_image_ptr, kernel_type, pre_op_functor, intra_op_functor, post_op_functor);
+//                 }
+//                 break;
+//             }
+//             case 800: {
+//                 SetEptForUseInLaunchParameters(Ept);
+//                 using FFT = decltype(FFT_base( ) + Size<SizeValue>( ) + SM<800>( ) + ElementsPerThread<Ept>( ));
+//                 SetAndLaunchKernel<FFT_ALGO_t, FFT, PreOpType, IntraOpType, PostOpType>(other_image_ptr, kernel_type, pre_op_functor, intra_op_functor, post_op_functor);
+//                 break;
+//             }
+//             case 860: {
+//                 // TODO: confirm that this is needed (over 860) which at the time just redirects to 700
+//                 //       if maintining this, we could save some time on compilation by combining with the 700 case
+//                 SetEptForUseInLaunchParameters(Ept);
+//                 using FFT = decltype(FFT_base( ) + Size<SizeValue>( ) + SM<700>( ) + ElementsPerThread<Ept>( ));
+//                 SetAndLaunchKernel<FFT_ALGO_t, FFT, PreOpType, IntraOpType, PostOpType>(other_image_ptr, kernel_type, pre_op_functor, intra_op_functor, post_op_functor);
+//                 break;
+//             }
+//             case 890: {
+//                 // TODO: confirm that this is needed (over 860) which at the time just redirects to 700
+//                 //       if maintining this, we could save some time on compilation by combining with the 700 case
+//                 // FIXME: on migrating to cufftDx 1.1.1
+
+//                 SetEptForUseInLaunchParameters(Ept);
+//                 using FFT = decltype(FFT_base( ) + Size<SizeValue>( ) + SM<700>( ) + ElementsPerThread<Ept>( ));
+//                 SetAndLaunchKernel<FFT_ALGO_t, FFT, PreOpType, IntraOpType, PostOpType>(other_image_ptr, kernel_type, pre_op_functor, intra_op_functor, post_op_functor);
+//                 break;
+//             }
+//             default: {
+//                 MyFFTRunTimeAssertTrue(false, "Unsupported architecture" + std::to_string(device_properties.device_arch));
+//                 break;
+//             }
+//         }
+//     }
+
+//     SelectSizeAndType<FFT_ALGO_t, FFT_base, PreOpType, IntraOpType, PostOpType, OtherValues...>(other_image_ptr, kernel_type, pre_op_functor, intra_op_functor, post_op_functor);
+// }
 
 template <class ComputeBaseType, class InputType, class OtherImageType, int Rank>
 template <int FFT_ALGO_t, class FFT_base_arch, class PreOpType, class IntraOpType, class PostOpType>

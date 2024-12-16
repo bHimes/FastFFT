@@ -18,7 +18,7 @@
 // #define FastFFT_build_sizes 32, 64, 128, 256, 512, 1024, 2048, 4096
 
 // #define FastFFT_build_sizes 16, 4, 32, 8, 64, 8, 128, 8, 256, 8, 512, 8, 1024, 8, 2048, 8, 4096, 16, 8192, 16
-#define FastFFT_build_sizes 512, 8, 2048, 8
+#define FastFFT_build_sizes 512, 2048
 
 namespace FastFFT {
 
@@ -630,10 +630,10 @@ class FourierTransformer {
     // void SelectSizeAndType(KernelType kernel_type, bool do_forward_transform, PreOpType pre_op_functor, IntraOpType intra_op_functor, PostOpType post_op_functor);
     // This allows us to iterate through a set of constexpr sizes passed as a template parameter pack. The value is in providing a means to have different size packs
     // for different fft configurations, eg. 2d vs 3d
-    template <int FFT_ALGO_t, class FFT_base, class PreOpType, class IntraOpType, class PostOpType>
-    void SelectSizeAndType(OtherImageType* other_image_ptr, KernelType kernel_type, PreOpType pre_op_functor, IntraOpType intra_op_functor, PostOpType post_op_functor);
+    template <int FFT_ALGO_t, class FFT_base, class PreOpType, class IntraOpType, class PostOpType, unsigned int SizeValue>
+    void SelectSizeAndTypeWithFold(OtherImageType* other_image_ptr, KernelType kernel_type, PreOpType pre_op_functor, IntraOpType intra_op_functor, PostOpType post_op_functor);
 
-    template <int FFT_ALGO_t, class FFT_base, class PreOpType, class IntraOpType, class PostOpType, unsigned int SizeValue, unsigned int Ept, unsigned int... OtherValues>
+    template <int FFT_ALGO_t, class FFT_base, class PreOpType, class IntraOpType, class PostOpType, unsigned int... SizeValues>
     void SelectSizeAndType(OtherImageType* other_image_ptr, KernelType kernel_type, PreOpType pre_op_functor, IntraOpType intra_op_functor, PostOpType post_op_functor);
 
     // 3.
