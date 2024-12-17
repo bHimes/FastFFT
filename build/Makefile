@@ -29,8 +29,17 @@ endif
 ifeq (${c2r_multiplier},)
 else
 NVCC_FLAGS+=-Dc2r_multiplier=${c2r_multiplier}
-$(info "setting c2r_multiplier to [${c2r_multiplier}]")
+$(info [setting c2r_multiplier to ${c2r_multiplier}])
 endif
+
+ifeq (${FastFFT_DEBUG_BUILD_TIME},)
+$(info [setting FastFFT_DEBUG_BUILD_TIME to disabled])
+else
+NVCC_FLAGS+=-DFastFFT_DEBUG_BUILD_TIME
+$(info [setting FastFFT_DEBUG_BUILD_TIME to enabled])
+endif
+
+
 
 # ifeq (${FastFFT_lto},1)
 # $(info "Building with LTO")

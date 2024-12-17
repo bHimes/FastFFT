@@ -111,6 +111,9 @@ FourierTransformer<ComputeBaseType, InputType, OtherImageType, Rank>::FourierTra
 
     // Make sure an explicit specializtion for the device pointers is available
     static_assert(! std::is_same_v<decltype(d_ptr.buffer_1), std::nullptr_t>, "Device pointer type not specialized");
+#ifdef FastFFT_DEBUG_BUILD_TIME
+    std::cerr << "Initi FastFFT object using code build on " << __DATE__ << " " << __TIME__ << std::endl;
+#endif
 }
 
 template <class ComputeBaseType, class InputType, class OtherImageType, int Rank>
@@ -1969,7 +1972,7 @@ void FourierTransformer<ComputeBaseType, InputType, OtherImageType, Rank>::SetAn
                                 d_ptr.external_input,
                                 reinterpret_cast<data_buffer_t*>(external_output_ptr),
                                 LP.mem_offsets,
-                                _i2pi_P<FFT, float>( ),
+                                _i2pi_div_N<FFT, float>(LP.Q),
                                 LP.Q,
                                 workspace);
                         postcheck;
@@ -1996,7 +1999,7 @@ void FourierTransformer<ComputeBaseType, InputType, OtherImageType, Rank>::SetAn
                                 d_ptr.external_input,
                                 d_ptr.buffer_1,
                                 LP.mem_offsets,
-                                _i2pi_P<FFT, float>( ),
+                                _i2pi_div_N<FFT, float>(LP.Q),
                                 LP.Q,
                                 workspace);
                         postcheck;
@@ -2030,7 +2033,7 @@ void FourierTransformer<ComputeBaseType, InputType, OtherImageType, Rank>::SetAn
                                 d_ptr.external_input,
                                 reinterpret_cast<data_buffer_t*>(external_output_ptr),
                                 LP.mem_offsets,
-                                _i2pi_P<FFT, float>( ),
+                                _i2pi_div_N<FFT, float>(LP.Q),
                                 LP.Q,
                                 workspace);
                         postcheck;
@@ -2043,7 +2046,7 @@ void FourierTransformer<ComputeBaseType, InputType, OtherImageType, Rank>::SetAn
                                 d_ptr.external_input,
                                 d_ptr.buffer_1,
                                 LP.mem_offsets,
-                                _i2pi_P<FFT, float>( ),
+                                _i2pi_div_N<FFT, float>(LP.Q),
                                 LP.Q,
                                 workspace);
                         postcheck;
@@ -2080,7 +2083,7 @@ void FourierTransformer<ComputeBaseType, InputType, OtherImageType, Rank>::SetAn
                                 d_ptr.external_input,
                                 d_ptr.buffer_1,
                                 LP.mem_offsets,
-                                _i2pi_P<FFT, float>( ),
+                                _i2pi_div_N<FFT, float>(LP.Q),
                                 LP.Q,
                                 workspace);
                         postcheck;
@@ -2193,7 +2196,7 @@ void FourierTransformer<ComputeBaseType, InputType, OtherImageType, Rank>::SetAn
                                 d_ptr.external_input,
                                 reinterpret_cast<data_buffer_t*>(external_output_ptr),
                                 LP.mem_offsets,
-                                _i2pi_P<FFT, float>( ),
+                                _i2pi_div_N<FFT, float>(LP.Q),
                                 LP.Q,
                                 workspace);
                         postcheck;
@@ -2205,7 +2208,7 @@ void FourierTransformer<ComputeBaseType, InputType, OtherImageType, Rank>::SetAn
                                 d_ptr.buffer_1,
                                 reinterpret_cast<data_buffer_t*>(external_output_ptr),
                                 LP.mem_offsets,
-                                _i2pi_P<FFT, float>( ),
+                                _i2pi_div_N<FFT, float>(LP.Q),
                                 LP.Q,
                                 workspace);
                         postcheck;
@@ -2242,7 +2245,7 @@ void FourierTransformer<ComputeBaseType, InputType, OtherImageType, Rank>::SetAn
                                 d_ptr.buffer_1,
                                 d_ptr.buffer_2,
                                 LP.mem_offsets,
-                                _i2pi_P<FFT, float>( ),
+                                _i2pi_div_N<FFT, float>(LP.Q),
                                 LP.Q,
                                 workspace);
                         postcheck;
@@ -2273,7 +2276,7 @@ void FourierTransformer<ComputeBaseType, InputType, OtherImageType, Rank>::SetAn
                         block_fft_kernel_C2C_INCREASE<FFT, data_buffer_t><<<LP.gridDims, LP.threadsPerBlock, shared_memory, cudaStreamPerThread>>>(
                                 d_ptr.external_input, reinterpret_cast<data_buffer_t*>(external_output_ptr),
                                 LP.mem_offsets,
-                                _i2pi_P<FFT, float>( ),
+                                _i2pi_div_N<FFT, float>(LP.Q),
                                 LP.Q,
                                 workspace);
                         postcheck;
@@ -2285,7 +2288,7 @@ void FourierTransformer<ComputeBaseType, InputType, OtherImageType, Rank>::SetAn
                                 d_ptr.buffer_1,
                                 reinterpret_cast<data_buffer_t*>(external_output_ptr),
                                 LP.mem_offsets,
-                                _i2pi_P<FFT, float>( ),
+                                _i2pi_div_N<FFT, float>(LP.Q),
                                 LP.Q,
                                 workspace);
                         postcheck;
@@ -2297,7 +2300,7 @@ void FourierTransformer<ComputeBaseType, InputType, OtherImageType, Rank>::SetAn
                                 d_ptr.buffer_2,
                                 reinterpret_cast<data_buffer_t*>(external_output_ptr),
                                 LP.mem_offsets,
-                                _i2pi_P<FFT, float>( ),
+                                _i2pi_div_N<FFT, float>(LP.Q),
                                 LP.Q,
                                 workspace);
                         postcheck;
@@ -2432,7 +2435,7 @@ void FourierTransformer<ComputeBaseType, InputType, OtherImageType, Rank>::SetAn
                         block_fft_kernel_C2C_DECREASE<FFT, data_buffer_t><<<LP.gridDims, LP.threadsPerBlock, shared_memory, cudaStreamPerThread>>>(
                                 reinterpret_cast<data_buffer_t*>(d_ptr.external_input),
                                 external_output_ptr, LP.mem_offsets,
-                                _i2pi_P<FFT, float>( ),
+                                _i2pi_div_N<FFT, float>(LP.Q),
                                 LP.Q,
                                 workspace);
                         postcheck;
@@ -2445,7 +2448,7 @@ void FourierTransformer<ComputeBaseType, InputType, OtherImageType, Rank>::SetAn
                                 reinterpret_cast<data_buffer_t*>(d_ptr.external_input),
                                 d_ptr.buffer_1,
                                 LP.mem_offsets,
-                                _i2pi_P<FFT, float>( ),
+                                _i2pi_div_N<FFT, float>(LP.Q),
                                 LP.Q,
                                 workspace);
                         postcheck;
@@ -2604,7 +2607,7 @@ void FourierTransformer<ComputeBaseType, InputType, OtherImageType, Rank>::SetAn
                                 d_ptr.external_input,
                                 external_output_ptr,
                                 LP.mem_offsets,
-                                _i2pi_P<FFT, float>( ),
+                                _i2pi_div_N<FFT, float>(LP.Q),
                                 LP.Q,
                                 workspace);
                         postcheck;
@@ -2619,7 +2622,7 @@ void FourierTransformer<ComputeBaseType, InputType, OtherImageType, Rank>::SetAn
                                     d_ptr.buffer_1,
                                     external_output_ptr,
                                     LP.mem_offsets,
-                                    _i2pi_P<FFT, float>( ),
+                                    _i2pi_div_N<FFT, float>(LP.Q),
                                     LP.Q,
                                     workspace);
                             postcheck;
@@ -2630,7 +2633,7 @@ void FourierTransformer<ComputeBaseType, InputType, OtherImageType, Rank>::SetAn
                                     d_ptr.buffer_2,
                                     external_output_ptr,
                                     LP.mem_offsets,
-                                    _i2pi_P<FFT, float>( ),
+                                    _i2pi_div_N<FFT, float>(LP.Q),
                                     LP.Q,
                                     workspace);
                             postcheck;
@@ -2683,7 +2686,7 @@ void FourierTransformer<ComputeBaseType, InputType, OtherImageType, Rank>::SetAn
                                 d_ptr.buffer_1,
                                 d_ptr.buffer_2,
                                 LP.mem_offsets,
-                                _i2pi_P<FFT, float>( ),
+                                _i2pi_div_N<FFT, float>(LP.Q),
                                 apparent_Q,
                                 workspace_fwd,
                                 workspace_inv);
