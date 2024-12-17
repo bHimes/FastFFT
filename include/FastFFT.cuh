@@ -357,6 +357,30 @@ struct io {
     using complex_compute_t = typename FFT::value_type;
     using scalar_compute_t  = typename complex_compute_t::value_type;
 
+    /*  For dealing with R2C and C2R we previously included all of the following code in each method:
+            constexpr unsigned int threads_per_fft        = cufftdx::size_of<FFT>::value / FFT::elements_per_thread;
+            constexpr unsigned int output_values_to_store = (cufftdx::size_of<FFT>::value / 2) + 1;
+            // threads_per_fft == 1 means that EPT == SIZE, so we need to store one more element
+            constexpr unsigned int values_left_to_store =
+                    threads_per_fft == 1 ? 1 : (output_values_to_store % threads_per_fft);
+        Since we limit FFTs to be power of 2 and also ept, as long as size >= ept the calculation will always yield 1
+        Then if ( threadIdx.x  == 0 )     = if ( threadIDx.x == 0 )
+
+        This means that for N x N/2+1 transform, we have N write ops where only 1 thread / warp is writing.
+        We could try to aggregate these values in shared and then write out, but this would depend on the number of blocks
+        fitting into an SM, and then one of those blocks waiting for all to finish before writing out. I can imagine this ending up 
+        being a pessimation in addition to complicating the code.
+
+        FIXME: that if we use the cufftdx::packed during the transform, we could efficiently handle the 0 and N/2 partial transforms at stage 2 
+        if we know that stage 1 was r2c and similarly between stage 6 and stage 7. 
+    */
+    static_assert(size_of<FFT>::value >= FFT::elements_per_thread, "FFT size must be greater than elements per thread");
+    static_assert(real_fft_mode_of<FFT>::value == real_mode::normal || real_fft_mode_of<FFT>::value == real_mode::folded,
+                  "R2C or C2Rs may only be normal or folded, packed layout is not supported");
+
+    // R2C/C2R can be normal (full), folded (packed into an n/2 + 1 complex) or packed (packed into a n/2 with the real part of the last in the imag part of the first)
+    // This *ONLY* works for 1D transforms
+
     template <typename data_io_t>
     static inline __device__ void load_r2c(const data_io_t*   input,
                                            complex_compute_t* thread_data) {
@@ -378,12 +402,7 @@ struct io {
             output[index] = thread_data[i];
             index += FFT::stride;
         }
-        constexpr unsigned int threads_per_fft        = cufftdx::size_of<FFT>::value / FFT::elements_per_thread;
-        constexpr unsigned int output_values_to_store = (cufftdx::size_of<FFT>::value / 2) + 1;
-        // threads_per_fft == 1 means that EPT == SIZE, so we need to store one more element
-        constexpr unsigned int values_left_to_store =
-                threads_per_fft == 1 ? 1 : (output_values_to_store % threads_per_fft);
-        if ( threadIdx.x < values_left_to_store ) {
+        if ( threadIdx.x == 0 ) {
             output[index] = thread_data[FFT::elements_per_thread / 2];
         }
     }
@@ -688,10 +707,7 @@ struct io {
             shared_mem[threadIdx.y + index * XZ_STRIDE] = thread_data[i];
             index += FFT::stride;
         }
-        constexpr unsigned int threads_per_fft        = cufftdx::size_of<FFT>::value / FFT::elements_per_thread;
-        constexpr unsigned int output_values_to_store = (cufftdx::size_of<FFT>::value / 2) + 1;
-        constexpr unsigned int values_left_to_store   = threads_per_fft == 1 ? 1 : (output_values_to_store % threads_per_fft);
-        if ( threadIdx.x < values_left_to_store ) {
+        if ( threadIdx.x == 0 ) {
             shared_mem[threadIdx.y + index * XZ_STRIDE] = thread_data[FFT::elements_per_thread / 2];
         }
         __syncthreads( );
@@ -719,10 +735,7 @@ struct io {
             output[Return1DFFTAddress_XZ_transpose(index)] = thread_data[i];
             index += FFT::stride;
         }
-        constexpr unsigned int threads_per_fft        = cufftdx::size_of<FFT>::value / FFT::elements_per_thread;
-        constexpr unsigned int output_values_to_store = (cufftdx::size_of<FFT>::value / 2) + 1;
-        constexpr unsigned int values_left_to_store   = threads_per_fft == 1 ? 1 : (output_values_to_store % threads_per_fft);
-        if ( threadIdx.x < values_left_to_store ) {
+        if ( threadIdx.x == 0 ) {
             output[Return1DFFTAddress_XZ_transpose(index)] = thread_data[FFT::elements_per_thread / 2];
         }
         __syncthreads( );
@@ -738,9 +751,8 @@ struct io {
             output[Return1DFFTAddress_XZ_transpose_strided_Z(index)] = convert_if_needed<FFT, data_io_t>(shared_mem, index);
             index += FFT::stride;
         }
-        constexpr unsigned int threads_per_fft      = cufftdx::size_of<FFT>::value / FFT::elements_per_thread;
-        constexpr unsigned int values_left_to_store = threads_per_fft == 1 ? 1 : (output_values_to_store % threads_per_fft);
-        if ( threadIdx.x < values_left_to_store ) {
+
+        if ( threadIdx.x == 0 ) {
             output[Return1DFFTAddress_XZ_transpose_strided_Z(index)] = convert_if_needed<FFT, data_io_t>(shared_mem, index);
         }
         __syncthreads( );
@@ -759,9 +771,7 @@ struct io {
             output[Return1DFFTAddress_XZ_transpose_strided_Z(index, Q, sub_fft)] = convert_if_needed<FFT, data_io_t>(shared_mem, index);
             index += FFT::stride;
         }
-        constexpr unsigned int threads_per_fft      = cufftdx::size_of<FFT>::value / FFT::elements_per_thread;
-        constexpr unsigned int values_left_to_store = threads_per_fft == 1 ? 1 : (output_values_to_store % threads_per_fft);
-        if ( threadIdx.x < values_left_to_store ) {
+        if ( threadIdx.x == 0 ) {
             output[Return1DFFTAddress_XZ_transpose_strided_Z(index, Q, sub_fft)] = convert_if_needed<FFT, data_io_t>(shared_mem, index);
         }
         __syncthreads( );
@@ -790,10 +800,7 @@ struct io {
             output[index * pixel_pitch + blockIdx.y] = convert_if_needed<FFT, data_io_t>(thread_data, i);
             index += FFT::stride;
         }
-        constexpr unsigned int threads_per_fft        = cufftdx::size_of<FFT>::value / FFT::elements_per_thread;
-        constexpr unsigned int output_values_to_store = (cufftdx::size_of<FFT>::value / 2) + 1;
-        constexpr unsigned int values_left_to_store   = threads_per_fft == 1 ? 1 : (output_values_to_store % threads_per_fft);
-        if ( threadIdx.x < values_left_to_store ) {
+        if ( threadIdx.x == 0 ) {
             output[index * pixel_pitch + blockIdx.y] = convert_if_needed<FFT, data_io_t>(thread_data, FFT::elements_per_thread / 2);
         }
     }
@@ -809,10 +816,7 @@ struct io {
             output[output_MAP[i] * pixel_pitch + blockIdx.y] = convert_if_needed<FFT, data_io_t>(thread_data, i);
             // if (blockIdx.y == 32) printf("from store transposed %i , val %f %f\n", output_MAP[i], thread_data[i].x, thread_data[i].y);
         }
-        constexpr unsigned int threads_per_fft        = cufftdx::size_of<FFT>::value / FFT::elements_per_thread;
-        constexpr unsigned int output_values_to_store = (cufftdx::size_of<FFT>::value / 2) + 1;
-        constexpr unsigned int values_left_to_store   = threads_per_fft == 1 ? 1 : (output_values_to_store % threads_per_fft);
-        if ( threadIdx.x < values_left_to_store ) {
+        if ( threadIdx.x == 0 ) {
             output[output_MAP[FFT::elements_per_thread / 2] * pixel_pitch + blockIdx.y] = convert_if_needed<FFT, data_io_t>(thread_data, FFT::elements_per_thread / 2);
         }
     }
@@ -832,10 +836,7 @@ struct io {
                 output[output_MAP[i] * pixel_pitch + blockIdx.y] = convert_if_needed<FFT, data_io_t>(thread_data, i);
             // if (blockIdx.y == 32) printf("from store transposed %i , val %f %f\n", output_MAP[i], thread_data[i].x, thread_data[i].y);
         }
-        // constexpr unsigned int threads_per_fft        = cufftdx::size_of<FFT>::value / FFT::elements_per_thread;
-        // constexpr unsigned int output_values_to_store = (cufftdx::size_of<FFT>::value / 2) + 1;
-        // constexpr unsigned int values_left_to_store = threads_per_fft == 1 ? 1 : (output_values_to_store % threads_per_fft);
-        // if (threadIdx.x < values_left_to_store)
+        // if (threadIdx.x  == 0)
         // {
         //   printf("index, pitch, blcok, address %i, %i, %i, %i\n", output_MAP[FFT::elements_per_thread / 2], pixel_pitch, blockIdx.y, output_MAP[FFT::elements_per_thread / 2]*pixel_pitch + blockIdx.y);
         //   if (output_MAP[FFT::elements_per_thread / 2] < memory_limit) output[output_MAP[FFT::elements_per_thread / 2]*pixel_pitch + blockIdx.y] =  thread_data[FFT::elements_per_thread / 2];
