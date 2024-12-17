@@ -1477,9 +1477,13 @@ __global__ void block_fft_kernel_C2C_INCREASE(const ComplexData_t* __restrict__ 
     complex_compute_t twiddle;
 
     // No need to __syncthreads as each thread only accesses its own shared mem anyway
-    io<FFT>::load_shared(&input_values[Return1DFFTAddress(size_of<FFT>::value)], shared_input_complex, thread_data, twiddle_factor_args, twiddle_in);
+    io<FFT>::load_shared(&input_values[Return1DFFTAddress(size_of<FFT>::value)],
+                         shared_input_complex,
+                         thread_data,
+                         twiddle_factor_args,
+                         twiddle_in);
 
-    FFT( ).execute(thread_data, shared_mem, workspace);
+     FFT( ).execute(thread_data, shared_mem, workspace);
     io<FFT>::store(thread_data, shared_output, Q, 0);
 
     // For the other fragments we need the initial twiddle
@@ -1552,7 +1556,10 @@ __launch_bounds__(XZ_STRIDE* FFT::max_threads_per_block) __global__
 
     // No need to __syncthreads as each thread only accesses its own shared mem anyway
     io<FFT>::load_shared(&input_values[Return1DFFTColumn_XYZ_transpose(size_of<FFT>::value)],
-                         &shared_input_complex[threadIdx.y * mem_offsets.shared_input], thread_data, twiddle_factor_args, twiddle_in);
+                         &shared_input_complex[threadIdx.y * mem_offsets.shared_input],
+                         thread_data,
+                         twiddle_factor_args,
+                         twiddle_in);
 
     FFT( ).execute(thread_data, &shared_mem[threadIdx.y * FFT::shared_memory_size / sizeof(complex_compute_t)], workspace);
     __syncthreads( );

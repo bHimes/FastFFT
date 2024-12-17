@@ -2,7 +2,7 @@
 #include "FastFFT.h"
 
 // #define USE_FOLDED_R2C_C2R
-// #define USE_FOLDED_C2R
+#define USE_FOLDED_C2R
 
 #ifndef __INCLUDE_FAST_FFT_CUH__
 #define __INCLUDE_FAST_FFT_CUH__
@@ -387,8 +387,7 @@ struct io {
 
         unsigned int index = threadIdx.x;
         for ( unsigned int i = 0; i < FFT::elements_per_thread; i++ ) {
-            thread_data[i].x = convert_if_needed<FFT, scalar_compute_t>(input, index);
-            thread_data[i].y = 0.0f;
+            thread_data[i] = convert_if_needed<FFT, complex_compute_t>(input, index);
             index += FFT::stride;
         }
     }
@@ -443,7 +442,7 @@ struct io {
         unsigned int index = threadIdx.x;
         for ( unsigned int i = 0; i < FFT::elements_per_thread; i++ ) {
             twiddle_factor_args[i] = twiddle_in * index;
-            thread_data[i]         = convert_if_needed<FFT, scalar_compute_t>(input, index);
+            thread_data[i]         = convert_if_needed<FFT, complex_compute_t>(input, index);
             shared_input[index]    = thread_data[i];
             index += FFT::stride;
         }
@@ -494,8 +493,7 @@ struct io {
             input_map[i]           = index;
             output_map[i]          = Q * index;
             twiddle_factor_args[i] = twiddle_in * index;
-            thread_data[i].x       = convert_if_needed<FFT, scalar_compute_t>(input, index);
-            thread_data[i].y       = 0.0f;
+            thread_data[i]         = convert_if_needed<FFT, complex_compute_t>(input, index);
             shared_input[index]    = thread_data[i].x;
             index += FFT::stride;
         }
@@ -514,8 +512,7 @@ struct io {
         unsigned int index = threadIdx.x;
         for ( unsigned int i = 0; i < FFT::elements_per_thread; i++ ) {
             twiddle_factor_args[i] = twiddle_in * index;
-            thread_data[i].x       = convert_if_needed<FFT, scalar_compute_t>(input, index);
-            thread_data[i].y       = 0.0f;
+            thread_data[i]         = convert_if_needed<FFT, complex_compute_t>(input, index);
             shared_input[index]    = thread_data[i].x;
             index += FFT::stride;
         }
@@ -527,7 +524,7 @@ struct io {
 
         unsigned int index = threadIdx.x + (threadIdx.y * size_of<FFT>::value);
         for ( unsigned int i = 0; i < FFT::elements_per_thread; i++ ) {
-            shared_mem[GetSharedMemPaddedIndex(index)] = complex_compute_t(convert_if_needed<FFT, scalar_compute_t>(input, index), 0.f);
+            shared_mem[GetSharedMemPaddedIndex(index)] = convert_if_needed<FFT, complex_compute_t>(input, index);
             index += FFT::stride;
         }
         __syncthreads( );
@@ -600,7 +597,7 @@ struct io {
         }
     }
 
-    // when using load_shared || load_r2c_shared, we need then copy from shared mem into the registers.
+    // when using lod_shared || load_r2c_shared, we need then copy from shared mem into the registers.
     // notice we still need the packed complex values for the xform.
     static inline __device__ void copy_from_shared(const scalar_compute_t* __restrict__ shared_input,
                                                    complex_compute_t* __restrict__ thread_data,

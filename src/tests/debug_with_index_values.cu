@@ -117,7 +117,7 @@ void compare_libraries(std::vector<int> size, FastFFT::SizeChangeType::Enum size
             float divide_by = FFT_DEBUG_STAGE == 0 ? 1.f : FFT_DEBUG_STAGE < 4 ? sqrtf(16.f)
                                                    : FFT_DEBUG_STAGE == 4      ? sqrtf(16.f * 16.f)
                                                    : FFT_DEBUG_STAGE < 7       ? sqrtf(16.f * 16.f * 16.f)
-                                                                               : 256.;
+                                                                               : 32. * 32.;
 
             float counter       = 0.f;
             int   pixel_counter = 0;
@@ -155,9 +155,6 @@ void compare_libraries(std::vector<int> size, FastFFT::SizeChangeType::Enum size
                 continue_debugging = debug_partial_fft<FFT_DEBUG_STAGE, Rank>(FT_output, fwd_dims_in, fwd_dims_out, inv_dims_in, inv_dims_out, __LINE__);
             }
 
-            for ( int i = 0; i < 10; i++ ) {
-                std::cout << FT_input.real_values[i] << " ";
-            }
             MyTestPrintAndExit(continue_debugging, "Partial FFT debug stage " + std::to_string(FFT_DEBUG_STAGE));
 
             oSize++;
@@ -189,7 +186,7 @@ int main(int argc, char** argv) {
         std::cout << "This doesn't make sense as the synchronizations are invalidating.\n";
 // exit(1);
 #endif
-        std::vector<int> size = {16, 16};
+        std::vector<int> size = {16, 32};
 
         SCT size_change_type;
         // Set the SCT to no_change, increase, or decrease
