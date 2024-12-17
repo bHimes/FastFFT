@@ -18,7 +18,7 @@
 // #define FastFFT_build_sizes 32, 64, 128, 256, 512, 1024, 2048, 4096
 
 // #define FastFFT_build_sizes 16, 4, 32, 8, 64, 8, 128, 8, 256, 8, 512, 8, 1024, 8, 2048, 8, 4096, 16, 8192, 16
-#define FastFFT_build_sizes 512, 2048
+#define FastFFT_build_sizes 16, 32
 
 namespace FastFFT {
 
@@ -143,7 +143,11 @@ class FourierTransformer {
     void CopyHostToDeviceAndSynchronize(InputType* input_pointer, int n_elements_to_copy = 0);
     void CopyHostToDevice(InputType* input_pointer, int n_elements_to_copy = 0);
 
-    void CopyDeviceToHostAndSynchronize(InputType* input_pointer, int n_elements_to_copy = 0);
+    void CopyDeviceToHostAndSynchronize(InputType* input_pointer, int n_elements_to_copy = 0) { CopyAndSynchronize(true, input_pointer, n_elements_to_copy); };
+
+    void CopyDeviceToDeviceAndSynchronize(InputType* input_pointer, int n_elements_to_copy = 0) { CopyAndSynchronize(false, input_pointer, n_elements_to_copy); };
+
+    void CopyAndSynchronize(bool to_host, InputType* input_pointer, int n_elements_to_copy = 0);
 
     // Using the enum directly from python is not something I've figured out yet. Just make simple methods.
     // FIXME: these are not currently used, and perhaps are not needed.

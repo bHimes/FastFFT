@@ -33,15 +33,15 @@ namespace FastFFT {
 template <class Description>
 struct check_and_set_ept {
     static_assert(is_fft<Description>::value, "Description is not a cuFFTDx FFT description");
-// Get the existing elements per thread
+    // Get the existing elements per thread
 
-// FIXME: The same logic should be added to USE_SUPPLIED_EPT
-// FIXME: THE SAME logic should be applied if USE_FOLDED_R2C is implemented
-#ifdef USE_FOLDED_C2R
-    using check_ept = std::conditional_t<type_of<Description>::value == fft_type::c2r, cufftdx::replace_t<Description, ElementsPerThread<Description::elements_per_thread * c2r_multiplier>>, Description>;
-#else
+    // FIXME: The same logic should be added to USE_SUPPLIED_EPT
+    // FIXME: THE SAME logic should be applied if USE_FOLDED_R2C is implemented
+    // #ifdef USE_FOLDED_C2R
+    //     using check_ept = std::conditional_t<type_of<Description>::value == fft_type::c2r, cufftdx::replace_t<Description, ElementsPerThread<Description::elements_per_thread * c2r_multiplier>>, Description>;
+    // #else
     using check_ept = Description;
-#endif
+    // /
 
   public:
     using type = check_ept;
@@ -1002,23 +1002,27 @@ void FourierTransformer<ComputeBaseType, InputType, OtherImageType, Rank>::SetDi
 ////////////////////////////////////////////////////
 
 template <class ComputeBaseType, class InputType, class OtherImageType, int Rank>
-void FourierTransformer<ComputeBaseType, InputType, OtherImageType, Rank>::CopyDeviceToHostAndSynchronize(InputType* input_pointer,
-                                                                                                          int        n_elements_to_copy) {
+void FourierTransformer<ComputeBaseType, InputType, OtherImageType, Rank>::CopyAndSynchronize(bool       to_host,
+                                                                                              InputType* input_pointer,
+                                                                                              int        n_elements_to_copy) {
     SetDimensions(DimensionCheckType::CopyToHost);
     int n_to_actually_copy = (n_elements_to_copy > 0) ? n_elements_to_copy : memory_size_to_copy_;
 
+    cudaMemcpyKind copy_kind = (to_host) ? cudaMemcpyDeviceToHost : cudaMemcpyHostToDevice;
+
     MyFFTDebugAssertTrue(n_to_actually_copy > 0, "Error in CopyDeviceToHostAndSynchronize: n_elements_to_copy must be > 0");
-    MyFFTDebugAssertTrue(is_pointer_in_memory_and_registered(input_pointer), "Error in CopyDeviceToHostAndSynchronize: input_pointer must be in memory and registered");
+    if ( to_host )
+        MyFFTDebugAssertTrue(is_pointer_in_memory_and_registered(input_pointer), "Error in CopyDeviceToHostAndSynchronize: input_pointer must be in memory and registered");
 
     switch ( current_buffer ) {
         case fastfft_external_input: {
             MyFFTDebugAssertTrue(is_pointer_in_device_memory(d_ptr.external_input), "Error in CopyDeviceToHostAndSynchronize: input_pointer must be in device memory");
-            cudaErr(cudaMemcpyAsync(input_pointer, d_ptr.external_input, n_to_actually_copy * sizeof(InputType), cudaMemcpyDeviceToHost, cudaStreamPerThread));
+            cudaErr(cudaMemcpyAsync(input_pointer, d_ptr.external_input, n_to_actually_copy * sizeof(InputType), copy_kind, cudaStreamPerThread));
             break;
         }
         case fastfft_external_output: {
             MyFFTDebugAssertTrue(is_pointer_in_device_memory(d_ptr.external_input), "Error in CopyDeviceToHostAndSynchronize: input_pointer must be in device memory");
-            cudaErr(cudaMemcpyAsync(input_pointer, d_ptr.external_output, n_to_actually_copy * sizeof(InputType), cudaMemcpyDeviceToHost, cudaStreamPerThread));
+            cudaErr(cudaMemcpyAsync(input_pointer, d_ptr.external_output, n_to_actually_copy * sizeof(InputType), copy_kind, cudaStreamPerThread));
             break;
         }
         // If we are in the internal buffers, our data is ComputeBaseType
@@ -1026,14 +1030,14 @@ void FourierTransformer<ComputeBaseType, InputType, OtherImageType, Rank>::CopyD
             MyFFTDebugAssertTrue(is_pointer_in_device_memory(d_ptr.buffer_1), "Error in CopyDeviceToHostAndSynchronize: input_pointer must be in device memory");
             if ( sizeof(ComputeBaseType) != sizeof(InputType) )
                 std::cerr << "\n\tWarning: CopyDeviceToHostAndSynchronize: sizeof(ComputeBaseType) != sizeof(InputType) - this may be a problem\n\n";
-            cudaErr(cudaMemcpyAsync(input_pointer, d_ptr.buffer_1, n_to_actually_copy * sizeof(ComputeBaseType), cudaMemcpyDeviceToHost, cudaStreamPerThread));
+            cudaErr(cudaMemcpyAsync(input_pointer, d_ptr.buffer_1, n_to_actually_copy * sizeof(ComputeBaseType), copy_kind, cudaStreamPerThread));
             break;
         }
         case fastfft_internal_buffer_2: {
             MyFFTDebugAssertTrue(is_pointer_in_device_memory(d_ptr.buffer_2), "Error in CopyDeviceToHostAndSynchronize: input_pointer must be in device memory");
             if ( sizeof(ComputeBaseType) != sizeof(InputType) )
                 std::cerr << "\n\tWarning: CopyDeviceToHostAndSynchronize: sizeof(ComputeBaseType) != sizeof(InputType) - this may be a problem\n\n";
-            cudaErr(cudaMemcpyAsync(input_pointer, d_ptr.buffer_2, n_to_actually_copy * sizeof(ComputeBaseType), cudaMemcpyDeviceToHost, cudaStreamPerThread));
+            cudaErr(cudaMemcpyAsync(input_pointer, d_ptr.buffer_2, n_to_actually_copy * sizeof(ComputeBaseType), copy_kind, cudaStreamPerThread));
             break;
         }
         default: {
@@ -1130,13 +1134,23 @@ __launch_bounds__(FFT::max_threads_per_block) __global__
 
     // No need to __syncthreads as each thread only accesses its own shared mem anyway
     // multiply Q*fwd_dims_out.w because x maps to y in the output transposed FFT
-    io<FFT>::load_r2c_shared(&input_values[Return1DFFTAddress(mem_offsets.physical_x_input)], shared_input, thread_data, twiddle_factor_args, twiddle_in, input_MAP, output_MAP, Q);
+    io<FFT>::load_r2c_shared(&input_values[Return1DFFTAddress(mem_offsets.physical_x_input)],
+                             shared_input,
+                             thread_data,
+                             twiddle_factor_args,
+                             twiddle_in,
+                             input_MAP,
+                             output_MAP,
+                             Q);
 
     // We unroll the first and last loops.
     // In the first FFT the modifying twiddle factor is 1 so the data are real
     FFT( ).execute(thread_data, shared_mem, workspace);
 
-    io<FFT>::store_r2c_transposed_xy(thread_data, &output_values[ReturnZplane(blockDim.y, mem_offsets.physical_x_output)], output_MAP, gridDim.y);
+    io<FFT>::store_r2c_transposed_xy(thread_data,
+                                     &output_values[ReturnZplane(blockDim.y, mem_offsets.physical_x_output)],
+                                     output_MAP,
+                                     gridDim.y);
 
     // For the other fragments we need the initial twiddle
     for ( int sub_fft = 1; sub_fft < Q - 1; sub_fft++ ) {
@@ -1150,7 +1164,10 @@ __launch_bounds__(FFT::max_threads_per_block) __global__
         }
         FFT( ).execute(thread_data, shared_mem, workspace);
 
-        io<FFT>::store_r2c_transposed_xy(thread_data, &output_values[ReturnZplane(blockDim.y, mem_offsets.physical_x_output)], output_MAP, gridDim.y);
+        io<FFT>::store_r2c_transposed_xy(thread_data,
+                                         &output_values[ReturnZplane(blockDim.y, mem_offsets.physical_x_output)],
+                                         output_MAP,
+                                         gridDim.y);
     }
 
     // For the last fragment we need to also do a bounds check.
@@ -1165,7 +1182,11 @@ __launch_bounds__(FFT::max_threads_per_block) __global__
 
     FFT( ).execute(thread_data, shared_mem, workspace);
 
-    io<FFT>::store_r2c_transposed_xy(thread_data, &output_values[ReturnZplane(blockDim.y, mem_offsets.physical_x_output)], output_MAP, gridDim.y, mem_offsets.physical_x_output);
+    io<FFT>::store_r2c_transposed_xy(thread_data,
+                                     &output_values[ReturnZplane(blockDim.y, mem_offsets.physical_x_output)],
+                                     output_MAP,
+                                     gridDim.y,
+                                     mem_offsets.physical_x_output);
 }
 
 template <class FFT, class InputData_t, class OutputData_t>
@@ -1328,7 +1349,9 @@ __global__ void block_fft_kernel_C2C_FWD_NONE_INV_DECREASE_ConjMul(const Externa
 #else
     // In the current simplified version of the kernel, I am not using any transform decomposition (this is because of the difficulties with resrved threadIdx.x/y in the cufftdx lib)
     // So the full thing is calculated and only truncated on output.
-    io<invFFT>::store(thread_data, &output_values[Return1DFFTAddress(size_of<FFT>::value / apparent_Q)], size_of<FFT>::value / apparent_Q);
+    io<invFFT>::store(thread_data,
+                      &output_values[Return1DFFTAddress(size_of<FFT>::value / apparent_Q)],
+                      size_of<FFT>::value / apparent_Q);
 #endif
 }
 
@@ -1355,7 +1378,8 @@ __launch_bounds__(FFT::max_threads_per_block) __global__
     // Since the memory ops are super straightforward this is an okay compromise.
     FFT( ).execute(thread_data, shared_mem, workspace);
 
-    io<FFT>::store(thread_data, &output_values[Return1DFFTAddress(size_of<FFT>::value)]);
+    io<FFT>::store(thread_data,
+                   &output_values[Return1DFFTAddress(size_of<FFT>::value)]);
 }
 
 template <class FFT, class ComplexData_t>
@@ -1569,7 +1593,7 @@ __launch_bounds__(FFT::max_threads_per_block) __global__
     // For loop zero the twiddles don't need to be computed
     FFT( ).execute(thread_data, shared_mem, workspace);
 
-    io<FFT>::store_c2r(thread_data, &output_values[Return1DFFTAddress(mem_offsets.physical_x_output)], size_of<FFT>::value);
+    io<FFT>::store_c2r(thread_data, &output_values[Return1DFFTAddress(mem_offsets.physical_x_output)]);
 }
 
 template <class FFT, class InputData_t, class OutputData_t>
@@ -1588,10 +1612,10 @@ __launch_bounds__(FFT::max_threads_per_block) __global__
 
     io<FFT>::load_c2r_transposed(&input_values[ReturnZplane(gridDim.y, mem_offsets.physical_x_input)], thread_data, gridDim.y);
 
-    // For loop zero the twiddles don't need to be computed
+    // // For loop zero the twiddles don't need to be computed
     FFT( ).execute(thread_data, shared_mem, workspace);
 
-    io<FFT>::store_c2r(thread_data, &output_values[Return1DFFTAddress(mem_offsets.physical_x_output)], size_of<FFT>::value);
+    io<FFT>::store_c2r(thread_data, &output_values[Return1DFFTAddress(mem_offsets.physical_x_output)]);
 }
 
 template <class FFT, class InputData_t, class OutputData_t>
@@ -2024,6 +2048,9 @@ void FourierTransformer<ComputeBaseType, InputType, OtherImageType, Rank>::SetAn
                     int shared_memory = LP.mem_offsets.shared_input * sizeof(scalar_compute_t) + FFT::shared_memory_size;
 
                     CheckSharedMemory(shared_memory, device_properties);
+                    std::cerr << " in r2c_increase_XY " << std::endl;
+                    PrintLaunchParameters(LP);
+                    PrintState( );
 #if FFT_DEBUG_STAGE > 0
                     cudaErr(cudaFuncSetAttribute((void*)block_fft_kernel_R2C_INCREASE_XY<FFT, data_io_t, data_buffer_t>, cudaFuncAttributeMaxDynamicSharedMemorySize, shared_memory));
                     if constexpr ( Rank == 1 ) {
@@ -2265,7 +2292,9 @@ void FourierTransformer<ComputeBaseType, InputType, OtherImageType, Rank>::SetAn
                     cudaError_t error_code    = cudaSuccess;
                     auto        workspace     = make_workspace<FFT>(error_code);
                     int         shared_memory = FFT::shared_memory_size + (unsigned int)sizeof(complex_compute_t) * (LP.mem_offsets.shared_input + LP.mem_offsets.shared_output);
-
+                    std::cerr << " in c2c_fwd_increase " << std::endl;
+                    PrintLaunchParameters(LP);
+                    PrintState( );
 #if FFT_DEBUG_STAGE > 2
                     CheckSharedMemory(shared_memory, device_properties);
                     cudaErr(cudaFuncSetAttribute((void*)block_fft_kernel_C2C_INCREASE<FFT, data_buffer_t>, cudaFuncAttributeMaxDynamicSharedMemorySize, shared_memory));
@@ -2473,10 +2502,13 @@ void FourierTransformer<ComputeBaseType, InputType, OtherImageType, Rank>::SetAn
 
             case c2r_none: {
                 if constexpr ( FFT_ALGO_t == Generic_Inv_FFT ) {
-#ifdef USE_FOLDED_R2C_C2R
-                    using FFT = decltype(FFT_base_arch( ) + Direction<fft_direction::inverse>( ) + Type<fft_type::c2r>( ) + RealFFTOptions<complex_layout::natural, real_mode::folded>);
+#ifdef USE_FOLDED_C2R
+                    using c2r_folded_options = RealFFTOptions<complex_layout::natural, real_mode::folded>;
+                    using extended_base      = decltype(FFT_base_arch( ) + Direction<fft_direction::inverse>( ) + Type<fft_type::c2r>( ) + c2r_folded_options( ));
+                    using FFT                = check_ept_t<extended_base>;
+
 #else
-                    using FFT = decltype(FFT_base_arch( ) + Direction<fft_direction::inverse>( ) + Type<fft_type::c2r>( ));
+                    using FFT = check_ept_t<decltype(FFT_base_arch( ) + Direction<fft_direction::inverse>( ) + Type<fft_type::c2r>( ))>;
 #endif
 
                     LaunchParams LP = SetLaunchParameters(c2r_none, FFT::elements_per_thread);
@@ -2522,14 +2554,19 @@ void FourierTransformer<ComputeBaseType, InputType, OtherImageType, Rank>::SetAn
 
             case c2r_none_XY: {
                 if constexpr ( FFT_ALGO_t == Generic_Inv_FFT ) {
-#ifdef USE_FOLDED_R2C_C2R
-                    using FFT = decltype(FFT_base_arch( ) + Direction<fft_direction::inverse>( ) + Type<fft_type::c2r>( ) + RealFFTOptions<complex_layout::natural, real_mode::folded>);
+#ifdef USE_FOLDED_C2R
+                    using c2r_folded_options = RealFFTOptions<complex_layout::natural, real_mode::folded>;
+                    using extended_base      = decltype(FFT_base_arch( ) + Direction<fft_direction::inverse>( ) + Type<fft_type::c2r>( ) + c2r_folded_options( ));
+                    using FFT                = check_ept_t<extended_base>;
+
 #else
-                    using FFT = decltype(FFT_base_arch( ) + Direction<fft_direction::inverse>( ) + Type<fft_type::c2r>( ));
+                    using FFT = check_ept_t<decltype(FFT_base_arch( ) + Direction<fft_direction::inverse>( ) + Type<fft_type::c2r>( ))>;
 #endif
 
                     LaunchParams LP = SetLaunchParameters(c2r_none_XY, FFT::elements_per_thread);
-
+                    std::cerr << "In c2r_none_XY " << std::endl;
+                    PrintLaunchParameters(LP);
+                    PrintState( );
                     cudaError_t error_code = cudaSuccess;
                     auto        workspace  = make_workspace<FFT>(error_code); // std::cout << " EPT: " << FFT::elements_per_thread << "kernel " << KernelName[kernel_type] << std::endl;        cudaErr(error_code);
 
@@ -2584,10 +2621,13 @@ void FourierTransformer<ComputeBaseType, InputType, OtherImageType, Rank>::SetAn
 
             case c2r_decrease_XY: {
                 if constexpr ( FFT_ALGO_t == Generic_Inv_FFT ) {
-#ifdef USE_FOLDED_R2C_C2R
-                    using FFT = decltype(FFT_base_arch( ) + Direction<fft_direction::inverse>( ) + Type<fft_type::c2r>( ) + RealFFTOptions<complex_layout::natural, real_mode::folded>);
+#ifdef USE_FOLDED_C2R
+                    using c2r_folded_options = RealFFTOptions<complex_layout::natural, real_mode::folded>;
+                    using extended_base      = decltype(FFT_base_arch( ) + Direction<fft_direction::inverse>( ) + Type<fft_type::c2r>( ) + c2r_folded_options( ));
+                    using FFT                = check_ept_t<extended_base>;
+
 #else
-                    using FFT = decltype(FFT_base_arch( ) + Direction<fft_direction::inverse>( ) + Type<fft_type::c2r>( ));
+                    using FFT = check_ept_t<decltype(FFT_base_arch( ) + Direction<fft_direction::inverse>( ) + Type<fft_type::c2r>( ))>;
 #endif
 
                     LaunchParams LP = SetLaunchParameters(c2r_decrease_XY, FFT::elements_per_thread);

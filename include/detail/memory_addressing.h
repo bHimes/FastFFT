@@ -27,6 +27,11 @@ static __device__ __forceinline__ unsigned int Return1DFFTAddress(const unsigned
     return pixel_pitch * (blockIdx.y + blockIdx.z * gridDim.y);
 }
 
+// Return the address of the 1D transform index 0
+static __device__ __forceinline__ unsigned int Return1DFFTAddress_transpose_XY(const unsigned int X, const unsigned int pixel_pitch) {
+    return pixel_pitch * X + blockIdx.y;
+}
+
 // Return the address of the 1D transform index 0. Right now testing for a stride of 2, but this could be modifiable if it works.
 static __device__ __forceinline__ unsigned int Return1DFFTAddress_strided_Z(const unsigned int pixel_pitch) {
     // In the current condition, threadIdx.y is either 0 || 1, and gridDim.z = size_z / 2

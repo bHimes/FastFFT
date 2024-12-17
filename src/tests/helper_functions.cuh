@@ -18,6 +18,13 @@
 #define MyTestPrintAndExit(cond, ...) { if(! cond) {std::cerr << __VA_ARGS__ << " From: " << __FILE__ << ":" << __LINE__ << " " << __PRETTY_FUNCTION__ << std::endl; exit(-1); }}
 
 // clang-format on
+template <typename T>
+inline int my_printer_rount_int(T a) {
+    if ( a > 0 )
+        return int(a + T{0.5});
+    else
+        return int(a - T{0.5});
+}
 
 bool check_floats(float a, float b, float epsilon = 0.0001) {
     return (fabsf(a - b) < epsilon);
@@ -31,7 +38,7 @@ void PrintArray(float2* array, short NX, short NY, short NZ, int line_wrapping =
             std::cout << x << "[ ";
             for ( int y = 0; y < NY; y++ ) {
                 // TODO: could these use the indexing functions?
-                std::cout << array[x + NX * (y + z * NY)].x << "," << array[x + NX * (y + z * NY)].y << " ";
+                std::cout << my_printer_rount_int(array[x + NX * (y + z * NY)].x) << "," << my_printer_rount_int(array[x + NX * (y + z * NY)].y) << " ";
                 n++;
                 if ( n == line_wrapping ) {
                     n = 0;
@@ -53,7 +60,7 @@ void PrintArray(float* array, short NX, short NY, short NZ, short NW, int line_w
 
             std::cout << x << "[ ";
             for ( int y = 0; y < NY; y++ ) {
-                std::cout << array[x + (2 * NW) * (y + z * NY)] << " ";
+                std::cout << my_printer_rount_int(array[x + (2 * NW) * (y + z * NY)]) << " ";
                 n++;
                 if ( n == line_wrapping ) {
                     n = 0;
@@ -76,7 +83,7 @@ void PrintArray_XZ(float2* array, short NX, short NY, short NZ, int line_wrappin
 
             std::cout << z << "[ ";
             for ( int y = 0; y < NY; y++ ) {
-                std::cout << array[z + NZ * (y + x * NY)].x << "," << array[z + NZ * (y + x * NY)].y << " ";
+                std::cout << my_printer_rount_int(array[z + NZ * (y + x * NY)].x) << "," << my_printer_rount_int(array[z + NZ * (y + x * NY)].y) << " ";
                 n++;
                 if ( n == line_wrapping ) {
                     n = 0;
