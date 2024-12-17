@@ -852,11 +852,8 @@ struct io {
             thread_data[i] = convert_if_needed<FFT, complex_compute_t>(input, index);
             index += FFT::stride;
         }
-        constexpr unsigned int threads_per_fft       = cufftdx::size_of<FFT>::value / FFT::elements_per_thread;
-        constexpr unsigned int output_values_to_load = (cufftdx::size_of<FFT>::value / 2) + 1;
-        // threads_per_fft == 1 means that EPT == SIZE, so we need to load one more element
-        constexpr unsigned int values_left_to_load = threads_per_fft == 1 ? 1 : (output_values_to_load % threads_per_fft);
-        if ( threadIdx.x < values_left_to_load ) {
+
+        if ( threadIdx.x == 0 ) {
             thread_data[FFT::elements_per_thread / 2] = convert_if_needed<FFT, complex_compute_t>(input, index);
         }
     }
@@ -871,11 +868,8 @@ struct io {
             thread_data[i] = convert_if_needed<FFT, complex_compute_t>(input, (pixel_pitch * index) + blockIdx.y);
             index += FFT::stride;
         }
-        constexpr unsigned int threads_per_fft       = cufftdx::size_of<FFT>::value / FFT::elements_per_thread;
-        constexpr unsigned int output_values_to_load = (cufftdx::size_of<FFT>::value / 2) + 1;
-        // threads_per_fft == 1 means that EPT == SIZE, so we need to load one more element
-        constexpr unsigned int values_left_to_load = threads_per_fft == 1 ? 1 : (output_values_to_load % threads_per_fft);
-        if ( threadIdx.x < values_left_to_load ) {
+
+        if ( threadIdx.x == 0 ) {
             thread_data[FFT::elements_per_thread / 2] = convert_if_needed<FFT, complex_compute_t>(input, (pixel_pitch * index) + blockIdx.y);
         }
     }
@@ -889,11 +883,8 @@ struct io {
             shared_mem[GetSharedMemPaddedIndex(index)] = input[pixel_pitch * index];
             index += FFT::stride;
         }
-        constexpr unsigned int threads_per_fft       = cufftdx::size_of<FFT>::value / FFT::elements_per_thread;
-        constexpr unsigned int output_values_to_load = (cufftdx::size_of<FFT>::value / 2) + 1;
-        // threads_per_fft == 1 means that EPT == SIZE, so we need to load one more element
-        constexpr unsigned int values_left_to_load = threads_per_fft == 1 ? 1 : (output_values_to_load % threads_per_fft);
-        if ( threadIdx.x < values_left_to_load ) {
+
+        if ( threadIdx.x == 0 ) {
             shared_mem[GetSharedMemPaddedIndex(index)] = input[pixel_pitch * index];
         }
         __syncthreads( );
