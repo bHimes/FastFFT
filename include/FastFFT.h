@@ -602,11 +602,7 @@ class FourierTransformer {
     GetTransformSize(KernelType kernel_type);
 
     void         GetTransformSize_thread(KernelType kernel_type, int thread_fft_size);
-    LaunchParams SetLaunchParameters(KernelType kernel_type);
-
-    inline void SetEptForUseInLaunchParameters(const int elements_per_thread) {
-        elements_per_thread_complex = elements_per_thread;
-    }
+    LaunchParams SetLaunchParameters(KernelType kernel_type, const int ept);
 
     // 1.
     // First call passed from a public transform function, selects block or thread and the transform precision.
@@ -717,8 +713,6 @@ class FourierTransformer {
     // Input is real or complex inferred from InputType
     DevicePointers<ComputeBaseType*, InputType*, OtherImageType*> d_ptr;
     // Check to make sure we haven't fouled up the explicit instantiation of DevicePointers
-
-    int elements_per_thread_complex; // Set depending on the kernel and size of the transform.
 
 }; // class Fourier Transformer
 
