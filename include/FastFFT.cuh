@@ -861,6 +861,7 @@ struct io {
                                                       const unsigned int pixel_pitch,
                                                       const unsigned int SignalLength = FFT::input_length) {
 #ifdef USE_FOLDED_C2R
+        static_assert(real_fft_mode_of<FFT>::value == real_mode::folded, "Folded C2R only supported for folded real FFTs");
         // Note: for c2r FFT::input_ept = N/2+1 whether folded or not, so this block would also work for normal c2r it also allows us to specify a non-fft signal length at the cost of extra branching
         unsigned int index = threadIdx.x;
         for ( unsigned int i = 0; i < FFT::input_ept; i++ ) {
@@ -1114,6 +1115,7 @@ struct io {
                                                     data_io_t* __restrict__ output) {
 
 #ifdef USE_FOLDED_C2R
+        static_assert(real_fft_mode_of<FFT>::value == real_mode::folded, "Folded C2R only supported for folded real FFTs");
         constexpr auto inner_loop_limit = sizeof(complex_compute_t) / sizeof(data_io_t);
         unsigned int   index            = (threadIdx.x * inner_loop_limit) + (threadIdx.y * size_of<FFT>::value);
         if ( threadIdx.y == 0 ) {
@@ -1157,19 +1159,48 @@ struct io {
     }
 
     template <typename data_io_t>
-    static inline __device__ void store_c2r(const complex_compute_t* __restrict__ thread_data,
-                                            data_io_t* __restrict__ output,
-                                            const unsigned int SignalLength = size_of<FFT>::value) {
+    static inline __device__
+            EnableIf<IsAllowedRealType<data_io_t>>
+            store_c2r(const complex_compute_t* __restrict__ thread_data,
+                      data_io_t* __restrict__ output,
+                      const unsigned int SignalLength = size_of<FFT>::value) {
 #ifdef USE_FOLDED_C2R
-        constexpr auto inner_loop_limit = sizeof(complex_compute_t) / sizeof(data_io_t);
-        for ( int i = 0; i < FFT::output_ept; ++i ) {
-            const unsigned int index = inner_loop_limit * (threadIdx.x + i * FFT::stride);
-#pragma unroll(inner_loop_limit)
-            for ( int j = 0; j < inner_loop_limit; ++j ) {
-                if ( index + j < SignalLength ) {
-                    output[index + j] = convert_if_needed<FFT, data_io_t>(thread_data, i * inner_loop_limit + j);
+        static_assert(real_fft_mode_of<FFT>::value == real_mode::folded, "Folded C2R only supported for folded real FFTs");
+
+        // Currently convert_to<> assumes if we are going from a complex float to a scalar half, that we can contract only the real part.
+        // Currently we assume we are always going to have an inner_loop limit of 2
+        constexpr unsigned int inner_loop_limit = 2; // using the sizeof approace as in cufftdx doesn't make sense when you have complex float to scalar half.
+        constexpr unsigned int stride           = FFT::stride;
+        unsigned int           index            = inner_loop_limit * threadIdx.x;
+        // everywhere we use i, we actually have i*inner_loop_limit, so just set that in the loop initializer
+        // for ( int i = 0; i < inner_loop_limit * FFT::output_ept; i += inner_loop_limit ) {
+        //     if ( index < SignalLength ) {
+        //         // We need to change convert_if_needed to just take the output pointer as well, and by fault,
+        //         // deduce the type set to from that, and then specialize for the case where we currently default to
+        //         // narrowing from re 0 *imag to just re
+        //         if constexpr ( std::is_same_v<data_io_t, __half> ) {
+        //             reinterpret_cast<__half2*>(output)[index] = convert_if_needed<FFT, __half2>(thread_data, i);
+        //         }
+        //         else {
+        //             reinterpret_cast<float2*>(output)[index] = convert_if_needed<FFT, float2>(thread_data, i);
+        //         }
+        //     }
+
+        //     index += stride;
+        // }
+
+        for ( unsigned int i = 0; i < FFT::input_ept; i++ ) {
+            for ( unsigned int j = 0; j < inner_loop_limit; ++j ) {
+                if ( i * stride * inner_loop_limit + j + threadIdx.x * inner_loop_limit < SignalLength ) {
+                    if constexpr ( std::is_same_v<data_io_t, __half> ) {
+                        reinterpret_cast<__half*>(output)[index + j] = __float2half_rn(reinterpret_cast<const float*>(thread_data)[i * inner_loop_limit + j]);
+                    }
+                    else {
+                        reinterpret_cast<float*>(output)[index + j] = reinterpret_cast<const float*>(thread_data)[i * inner_loop_limit + j];
+                    }
                 }
             }
+            index += stride * inner_loop_limit;
         }
 
 #else

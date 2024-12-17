@@ -20,7 +20,7 @@
 #endif
 
 #ifndef minBlocksPerMultiprocessor
-#define minBlocksPerMultiprocessor 3
+#define minBlocksPerMultiprocessor 2
 #endif
 
 // The cufftdx library code assumes that both shared_memory and shared_memory_input are aligned to 128 bits for optimal memory operations.
@@ -33,15 +33,15 @@ namespace FastFFT {
 template <class Description>
 struct check_and_set_ept {
     static_assert(is_fft<Description>::value, "Description is not a cuFFTDx FFT description");
-    // Get the existing elements per thread
+// Get the existing elements per thread
 
-    // FIXME: The same logic should be added to USE_SUPPLIED_EPT
-    // FIXME: THE SAME logic should be applied if USE_FOLDED_R2C is implemented
-    // #ifdef USE_FOLDED_C2R
-    //     using check_ept = std::conditional_t<type_of<Description>::value == fft_type::c2r, cufftdx::replace_t<Description, ElementsPerThread<Description::elements_per_thread * c2r_multiplier>>, Description>;
-    // #else
+// FIXME: The same logic should be added to USE_SUPPLIED_EPT
+// FIXME: THE SAME logic should be applied if USE_FOLDED_R2C is implemented
+#ifdef USE_FOLDED_C2R
+    using check_ept = std::conditional_t<type_of<Description>::value == fft_type::c2r, cufftdx::replace_t<Description, ElementsPerThread<Description::elements_per_thread * c2r_multiplier>>, Description>;
+#else
     using check_ept = Description;
-    // /
+#endif
 
   public:
     using type = check_ept;
@@ -1483,7 +1483,7 @@ __global__ void block_fft_kernel_C2C_INCREASE(const ComplexData_t* __restrict__ 
                          twiddle_factor_args,
                          twiddle_in);
 
-     FFT( ).execute(thread_data, shared_mem, workspace);
+    FFT( ).execute(thread_data, shared_mem, workspace);
     io<FFT>::store(thread_data, shared_output, Q, 0);
 
     // For the other fragments we need the initial twiddle
@@ -1992,10 +1992,6 @@ void FourierTransformer<ComputeBaseType, InputType, OtherImageType, Rank>::SetAn
 #if FFT_DEBUG_STAGE > 0
 
                     cudaErr(cudaFuncSetAttribute((void*)block_fft_kernel_R2C_DECREASE_XY<FFT, data_io_t, data_buffer_t>, cudaFuncAttributeMaxDynamicSharedMemorySize, shared_memory));
-                    // PrintState( );
-                    // PrintLaunchParameters(LP);
-                    // std::cerr << "shared mem req " << shared_memory << std::endl;
-                    // std::cerr << "FFT max tbp " << FFT::max_threads_per_block << std::endl;
                     if constexpr ( Rank == 1 ) {
                         MyFFTDebugAssertTrue(current_buffer == fastfft_external_input, "current_buffer != fastfft_external_input");
                         precheck;
@@ -2012,20 +2008,6 @@ void FourierTransformer<ComputeBaseType, InputType, OtherImageType, Rank>::SetAn
                     else if constexpr ( Rank == 2 ) {
                         MyFFTDebugAssertTrue(current_buffer == fastfft_external_input, "current_buffer != fastfft_external_input");
                         precheck;
-                        // PrintState( );
-                        // PrintLaunchParameters(LP);
-                        // std::cerr << "shared mem req " << shared_memory << std::endl;
-                        // int    numBlocks;
-                        // size_t block_size = LP.threadsPerBlock.x * LP.threadsPerBlock.y * LP.threadsPerBlock.y;
-                        // cudaErr(cudaOccupancyMaxActiveBlocksPerMultiprocessor(&numBlocks, (void*)block_fft_kernel_R2C_DECREASE_XY<FFT, data_io_t, data_buffer_t>, block_size, size_t(shared_memory)));
-
-                        // std::cerr << "BLock size " << block_size << " shared mem " << shared_memory << " numBlocks " << numBlocks << std::endl;
-                        // std::cerr << "pointer " << d_ptr.external_input << " is in memory " << is_pointer_in_device_memory(d_ptr.external_input) << std::endl;
-                        // std::cerr << "pointer " << d_ptr.buffer_1 << " is in memory " << is_pointer_in_device_memory(d_ptr.buffer_1) << std::endl;
-                        // std::cerr << "FFT::shared_memory_size " << FFT::shared_memory_size << std::endl;
-                        // std::cerr << "size_of<FFT>::value " << size_of<FFT>::value << std::endl;
-                        // std::cerr << "batch_size_of<FFT>::value " << batch_size_of<FFT>::value << std::endl;
-                        // std::cerr << "FFT::elements_per_thread " << FFT::elements_per_thread << std::endl;
                         block_fft_kernel_R2C_DECREASE_XY<FFT, data_io_t, data_buffer_t><<<LP.gridDims, LP.threadsPerBlock, shared_memory, cudaStreamPerThread>>>(
                                 d_ptr.external_input,
                                 d_ptr.buffer_1,
@@ -2055,9 +2037,6 @@ void FourierTransformer<ComputeBaseType, InputType, OtherImageType, Rank>::SetAn
                     int shared_memory = LP.mem_offsets.shared_input * sizeof(scalar_compute_t) + FFT::shared_memory_size;
 
                     CheckSharedMemory(shared_memory, device_properties);
-                    std::cerr << " in r2c_increase_XY " << std::endl;
-                    PrintLaunchParameters(LP);
-                    PrintState( );
 #if FFT_DEBUG_STAGE > 0
                     cudaErr(cudaFuncSetAttribute((void*)block_fft_kernel_R2C_INCREASE_XY<FFT, data_io_t, data_buffer_t>, cudaFuncAttributeMaxDynamicSharedMemorySize, shared_memory));
                     if constexpr ( Rank == 1 ) {
@@ -2299,9 +2278,6 @@ void FourierTransformer<ComputeBaseType, InputType, OtherImageType, Rank>::SetAn
                     cudaError_t error_code    = cudaSuccess;
                     auto        workspace     = make_workspace<FFT>(error_code);
                     int         shared_memory = FFT::shared_memory_size + (unsigned int)sizeof(complex_compute_t) * (LP.mem_offsets.shared_input + LP.mem_offsets.shared_output);
-                    std::cerr << " in c2c_fwd_increase " << std::endl;
-                    PrintLaunchParameters(LP);
-                    PrintState( );
 #if FFT_DEBUG_STAGE > 2
                     CheckSharedMemory(shared_memory, device_properties);
                     cudaErr(cudaFuncSetAttribute((void*)block_fft_kernel_C2C_INCREASE<FFT, data_buffer_t>, cudaFuncAttributeMaxDynamicSharedMemorySize, shared_memory));
@@ -2570,12 +2546,9 @@ void FourierTransformer<ComputeBaseType, InputType, OtherImageType, Rank>::SetAn
                     using FFT = check_ept_t<decltype(FFT_base_arch( ) + Direction<fft_direction::inverse>( ) + Type<fft_type::c2r>( ))>;
 #endif
 
-                    LaunchParams LP = SetLaunchParameters(c2r_none_XY, FFT::elements_per_thread);
-                    std::cerr << "In c2r_none_XY " << std::endl;
-                    PrintLaunchParameters(LP);
-                    PrintState( );
-                    cudaError_t error_code = cudaSuccess;
-                    auto        workspace  = make_workspace<FFT>(error_code); // std::cout << " EPT: " << FFT::elements_per_thread << "kernel " << KernelName[kernel_type] << std::endl;        cudaErr(error_code);
+                    LaunchParams LP         = SetLaunchParameters(c2r_none_XY, FFT::elements_per_thread);
+                    cudaError_t  error_code = cudaSuccess;
+                    auto         workspace  = make_workspace<FFT>(error_code); // std::cout << " EPT: " << FFT::elements_per_thread << "kernel " << KernelName[kernel_type] << std::endl;        cudaErr(error_code);
 
                     int shared_memory = FFT::shared_memory_size;
 
