@@ -1169,40 +1169,18 @@ struct io {
 
         // Currently convert_to<> assumes if we are going from a complex float to a scalar half, that we can contract only the real part.
         // Currently we assume we are always going to have an inner_loop limit of 2
-        constexpr unsigned int inner_loop_limit = 2; // using the sizeof approace as in cufftdx doesn't make sense when you have complex float to scalar half.
-        constexpr unsigned int stride           = FFT::stride;
-        unsigned int           index            = inner_loop_limit * threadIdx.x;
-        // everywhere we use i, we actually have i*inner_loop_limit, so just set that in the loop initializer
-        // for ( int i = 0; i < inner_loop_limit * FFT::output_ept; i += inner_loop_limit ) {
-        //     if ( index < SignalLength ) {
-        //         // We need to change convert_if_needed to just take the output pointer as well, and by fault,
-        //         // deduce the type set to from that, and then specialize for the case where we currently default to
-        //         // narrowing from re 0 *imag to just re
-        //         if constexpr ( std::is_same_v<data_io_t, __half> ) {
-        //             reinterpret_cast<__half2*>(output)[index] = convert_if_needed<FFT, __half2>(thread_data, i);
-        //         }
-        //         else {
-        //             reinterpret_cast<float2*>(output)[index] = convert_if_needed<FFT, float2>(thread_data, i);
-        //         }
-        //     }
-
-        //     index += stride;
-        // }
-
+        unsigned int index = threadIdx.x;
         for ( unsigned int i = 0; i < FFT::input_ept; i++ ) {
-            for ( unsigned int j = 0; j < inner_loop_limit; ++j ) {
-                if ( i * stride * inner_loop_limit + j + threadIdx.x * inner_loop_limit < SignalLength ) {
-                    if constexpr ( std::is_same_v<data_io_t, __half> ) {
-                        reinterpret_cast<__half*>(output)[index + j] = __float2half_rn(reinterpret_cast<const float*>(thread_data)[i * inner_loop_limit + j]);
-                    }
-                    else {
-                        reinterpret_cast<float*>(output)[index + j] = reinterpret_cast<const float*>(thread_data)[i * inner_loop_limit + j];
-                    }
+            if ( index < SignalLength / 2 ) {
+                if constexpr ( std::is_same_v<data_io_t, __half> ) {
+                    reinterpret_cast<__half2*>(output)[index] = __float22half2_rn(reinterpret_cast<const float2*>(thread_data)[i]);
+                }
+                else {
+                    reinterpret_cast<float2*>(output)[index] = reinterpret_cast<const float2*>(thread_data)[i];
                 }
             }
-            index += stride * inner_loop_limit;
+            index += FFT::stride;
         }
-
 #else
         unsigned int index = threadIdx.x;
         for ( unsigned int i = 0; i < FFT::elements_per_thread; i++ ) {

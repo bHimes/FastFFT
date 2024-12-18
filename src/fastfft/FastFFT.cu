@@ -20,7 +20,7 @@
 #endif
 
 #ifndef minBlocksPerMultiprocessor
-#define minBlocksPerMultiprocessor 2
+#define minBlocksPerMultiprocessor 3
 #endif
 
 // The cufftdx library code assumes that both shared_memory and shared_memory_input are aligned to 128 bits for optimal memory operations.
