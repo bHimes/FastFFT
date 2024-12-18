@@ -56,10 +56,7 @@ __launch_bounds__(FFT::max_threads_per_block) __global__
                                                            ComplexData_t* __restrict__ output_values,
                                                            Offsets mem_offsets, int apparent_Q,
                                                            typename FFT::workspace_type    workspace_fwd,
-                                                           typename invFFT::workspace_type workspace_inv,
-                                                           PreOpType                       pre_op_functor,
-                                                           IntraOpType                     intra_op_functor,
-                                                           PostOpType                      post_op_functor) {
+                                                           typename invFFT::workspace_type workspace_inv) {
 
     // Initialize the shared memory, assuming everyting matches the input data X size in
     using complex_compute_t = typename FFT::value_type;
@@ -74,21 +71,20 @@ __launch_bounds__(FFT::max_threads_per_block) __global__
     // It may be worth trying to use threadIdx.y as in the DECREASE methods.
     // Until then, this
 
-    io<FFT>::load(&input_values[Return1DFFTAddress(size_of<FFT>::value / apparent_Q)], thread_data, size_of<FFT>::value / apparent_Q, pre_op_functor);
+    io<FFT, PreOpType>::load(&input_values[Return1DFFTAddress(size_of<FFT>::value / apparent_Q)], thread_data, size_of<FFT>::value / apparent_Q);
 
     // In the first FFT the modifying twiddle factor is 1 so the data are reeal
     FFT( ).execute(thread_data, shared_mem, workspace_fwd);
 
 #if FFT_DEBUG_STAGE > 3
     //  * apparent_Q
-    io<invFFT>::load_shared(&image_to_search[Return1DFFTAddress(size_of<FFT>::value)],
-                            thread_data,
-                            intra_op_functor);
+    io<invFFT, IntraOpType>::load_external_img(&image_to_search[Return1DFFTAddress(size_of<FFT>::value)],
+                                               thread_data);
 #endif
 
 #if FFT_DEBUG_STAGE > 4
     invFFT( ).execute(thread_data, shared_mem, workspace_inv);
-    io<invFFT>::store(thread_data, &output_values[Return1DFFTAddress(size_of<FFT>::value)], post_op_functor);
+    io<invFFT, PostOpType>::store(thread_data, &output_values[Return1DFFTAddress(size_of<FFT>::value)]);
 #else
     // Do not do the post op lambda if the invFFT is not used.
     io<invFFT>::store(thread_data, &output_values[Return1DFFTAddress(size_of<FFT>::value)]);
@@ -354,10 +350,8 @@ void FourierTransformer<ComputeBaseType, InputType, OtherImageType, Rank>::CopyH
 template <class ComputeBaseType, class InputType, class OtherImageType, int Rank>
 template <class PreOpType,
           class IntraOpType>
-void FourierTransformer<ComputeBaseType, InputType, OtherImageType, Rank>::FwdFFT(InputType*  input_ptr,
-                                                                                  InputType*  output_ptr,
-                                                                                  PreOpType   pre_op,
-                                                                                  IntraOpType intra_op) {
+void FourierTransformer<ComputeBaseType, InputType, OtherImageType, Rank>::FwdFFT(InputType* input_ptr,
+                                                                                  InputType* output_ptr) {
 
     transform_stage_completed = 0;
     current_buffer            = fastfft_external_input;
@@ -370,10 +364,8 @@ void FourierTransformer<ComputeBaseType, InputType, OtherImageType, Rank>::FwdFF
 template <class ComputeBaseType, class InputType, class OtherImageType, int Rank>
 template <class IntraOpType,
           class PostOpType>
-void FourierTransformer<ComputeBaseType, InputType, OtherImageType, Rank>::InvFFT(InputType*  input_ptr,
-                                                                                  InputType*  output_ptr,
-                                                                                  IntraOpType intra_op,
-                                                                                  PostOpType  post_op) {
+void FourierTransformer<ComputeBaseType, InputType, OtherImageType, Rank>::InvFFT(InputType* input_ptr,
+                                                                                  InputType* output_ptr) {
     transform_stage_completed = 4;
     current_buffer            = fastfft_external_input;
     // Keep track of the device side pointer used when called
@@ -390,25 +382,21 @@ template <class PreOpType,
           class PostOpType>
 void FourierTransformer<ComputeBaseType, InputType, OtherImageType, Rank>::FwdImageInvFFT(InputType*      input_ptr,
                                                                                           OtherImageType* image_to_search,
-                                                                                          InputType*      output_ptr,
-                                                                                          PreOpType       pre_op,
-                                                                                          IntraOpType     intra_op,
-                                                                                          PostOpType      post_op) {
+                                                                                          InputType*      output_ptr) {
     transform_stage_completed = 0;
     current_buffer            = fastfft_external_input;
     // Keep track of the device side pointer used when called
     d_ptr.external_input  = input_ptr;
     d_ptr.external_output = output_ptr;
 
-    Generic_Fwd_Image_Inv<PreOpType, IntraOpType, PostOpType>(image_to_search, pre_op, intra_op, post_op);
+    Generic_Fwd_Image_Inv<PreOpType, IntraOpType, PostOpType>(image_to_search, pre_op);
 }
 
 template <class ComputeBaseType, class InputType, class OtherImageType, int Rank>
 template <class PreOpType,
           class IntraOpType>
 EnableIf<IsAllowedInputType<InputType>>
-FourierTransformer<ComputeBaseType, InputType, OtherImageType, Rank>::Generic_Fwd(PreOpType   pre_op_functor,
-                                                                                  IntraOpType intra_op_functor) {
+FourierTransformer<ComputeBaseType, InputType, OtherImageType, Rank>::Generic_Fwd( ) {
 
     SetDimensions(DimensionCheckType::FwdTransform);
 
@@ -422,17 +410,17 @@ FourierTransformer<ComputeBaseType, InputType, OtherImageType, Rank>::Generic_Fw
         if constexpr ( IsAllowedRealType<InputType> ) {
             switch ( fwd_size_change_type ) {
                 case SizeChangeType::no_change: {
-                    SetPrecisionAndExectutionMethod<Generic_Fwd_FFT>(nullptr, r2c_none_XY, pre_op_functor, intra_op_functor);
+                    SetPrecisionAndExectutionMethod<Generic_Fwd_FFT, PreOpType, IntraOpType, KernelFunction::default_functor_noop_t>(nullptr, r2c_none_XY);
                     transform_stage_completed = 1;
                     break;
                 }
                 case SizeChangeType::decrease: {
-                    SetPrecisionAndExectutionMethod<Generic_Fwd_FFT>(nullptr, r2c_decrease_XY, pre_op_functor, intra_op_functor);
+                    SetPrecisionAndExectutionMethod<Generic_Fwd_FFT, PreOpType, IntraOpType, KernelFunction::default_functor_noop_t>(nullptr, r2c_decrease_XY);
                     transform_stage_completed = 1;
                     break;
                 }
                 case SizeChangeType::increase: {
-                    SetPrecisionAndExectutionMethod<Generic_Fwd_FFT>(nullptr, r2c_increase_XY, pre_op_functor, intra_op_functor);
+                    SetPrecisionAndExectutionMethod<Generic_Fwd_FFT, PreOpType, IntraOpType, KernelFunction::default_functor_noop_t>(nullptr, r2c_increase_XY);
                     transform_stage_completed = 1;
                     break;
                 }
@@ -445,17 +433,17 @@ FourierTransformer<ComputeBaseType, InputType, OtherImageType, Rank>::Generic_Fw
             switch ( fwd_size_change_type ) {
                 case SizeChangeType::no_change: {
                     MyFFTDebugAssertTrue(false, "Complex input images are not yet supported"); // FIXME:
-                    SetPrecisionAndExectutionMethod<Generic_Fwd_FFT>(nullptr, c2c_fwd_none, pre_op_functor, intra_op_functor);
+                    SetPrecisionAndExectutionMethod<Generic_Fwd_FFT, PreOpType, IntraOpType, KernelFunction::default_functor_noop_t>(nullptr, c2c_fwd_none);
                     transform_stage_completed = 1;
                     break;
                 }
                 case SizeChangeType::decrease: {
-                    SetPrecisionAndExectutionMethod<Generic_Fwd_FFT>(nullptr, c2c_fwd_decrease, pre_op_functor, intra_op_functor);
+                    SetPrecisionAndExectutionMethod<Generic_Fwd_FFT, PreOpType, IntraOpType, KernelFunction::default_functor_noop_t>(nullptr, c2c_fwd_decrease);
                     transform_stage_completed = 1;
                     break;
                 }
                 case SizeChangeType::increase: {
-                    SetPrecisionAndExectutionMethod<Generic_Fwd_FFT>(nullptr, c2c_fwd_increase, pre_op_functor, intra_op_functor);
+                    SetPrecisionAndExectutionMethod<Generic_Fwd_FFT, PreOpType, IntraOpType, KernelFunction::default_functor_noop_t>(nullptr, c2c_fwd_increase);
                     transform_stage_completed = 1;
                     break;
                 }
@@ -468,23 +456,23 @@ FourierTransformer<ComputeBaseType, InputType, OtherImageType, Rank>::Generic_Fw
     else if constexpr ( Rank == 2 ) {
         switch ( fwd_size_change_type ) {
             case SizeChangeType::no_change: {
-                SetPrecisionAndExectutionMethod<Generic_Fwd_FFT>(nullptr, r2c_none_XY, pre_op_functor, intra_op_functor);
+                SetPrecisionAndExectutionMethod<Generic_Fwd_FFT, PreOpType, IntraOpType, KernelFunction::default_functor_noop_t>(nullptr, r2c_none_XY);
                 transform_stage_completed = 1;
-                SetPrecisionAndExectutionMethod<Generic_Fwd_FFT>(nullptr, c2c_fwd_none, pre_op_functor, intra_op_functor);
+                SetPrecisionAndExectutionMethod<Generic_Fwd_FFT, PreOpType, IntraOpType, KernelFunction::default_functor_noop_t>(nullptr, c2c_fwd_none);
                 transform_stage_completed = 3;
                 break;
             }
             case SizeChangeType::increase: {
-                SetPrecisionAndExectutionMethod<Generic_Fwd_FFT>(nullptr, r2c_increase_XY, pre_op_functor, intra_op_functor);
+                SetPrecisionAndExectutionMethod<Generic_Fwd_FFT, PreOpType, IntraOpType, KernelFunction::default_functor_noop_t>(nullptr, r2c_increase_XY);
                 transform_stage_completed = 1;
-                SetPrecisionAndExectutionMethod<Generic_Fwd_FFT>(nullptr, c2c_fwd_increase, pre_op_functor, intra_op_functor);
+                SetPrecisionAndExectutionMethod<Generic_Fwd_FFT, PreOpType, IntraOpType, KernelFunction::default_functor_noop_t>(nullptr, c2c_fwd_increase);
                 transform_stage_completed = 3;
                 break;
             }
             case SizeChangeType::decrease: {
-                SetPrecisionAndExectutionMethod<Generic_Fwd_FFT>(nullptr, r2c_decrease_XY, pre_op_functor, intra_op_functor);
+                SetPrecisionAndExectutionMethod<Generic_Fwd_FFT, PreOpType, IntraOpType, KernelFunction::default_functor_noop_t>(nullptr, r2c_decrease_XY);
                 transform_stage_completed = 1;
-                SetPrecisionAndExectutionMethod<Generic_Fwd_FFT>(nullptr, c2c_fwd_decrease, pre_op_functor, intra_op_functor);
+                SetPrecisionAndExectutionMethod<Generic_Fwd_FFT, PreOpType, IntraOpType, KernelFunction::default_functor_noop_t>(nullptr, c2c_fwd_decrease);
                 transform_stage_completed = 3;
                 break;
             }
@@ -493,20 +481,20 @@ FourierTransformer<ComputeBaseType, InputType, OtherImageType, Rank>::Generic_Fw
     else if constexpr ( Rank == 3 ) {
         switch ( fwd_size_change_type ) {
             case SizeChangeType::no_change: {
-                SetPrecisionAndExectutionMethod<Generic_Fwd_FFT>(nullptr, r2c_none_XZ, pre_op_functor, intra_op_functor);
+                SetPrecisionAndExectutionMethod<Generic_Fwd_FFT, PreOpType, IntraOpType, KernelFunction::default_functor_noop_t>(nullptr, r2c_none_XZ);
                 transform_stage_completed = 1;
-                SetPrecisionAndExectutionMethod<Generic_Fwd_FFT>(nullptr, c2c_fwd_none_XYZ, pre_op_functor, intra_op_functor);
+                SetPrecisionAndExectutionMethod<Generic_Fwd_FFT, PreOpType, IntraOpType, KernelFunction::default_functor_noop_t>(nullptr, c2c_fwd_none_XYZ);
                 transform_stage_completed = 2;
-                SetPrecisionAndExectutionMethod<Generic_Fwd_FFT>(nullptr, c2c_fwd_none, pre_op_functor, intra_op_functor);
+                SetPrecisionAndExectutionMethod<Generic_Fwd_FFT, PreOpType, IntraOpType, KernelFunction::default_functor_noop_t>(nullptr, c2c_fwd_none);
                 transform_stage_completed = 3;
                 break;
             }
             case SizeChangeType::increase: {
-                SetPrecisionAndExectutionMethod<Generic_Fwd_FFT>(nullptr, r2c_increase_XZ, pre_op_functor, intra_op_functor);
+                SetPrecisionAndExectutionMethod<Generic_Fwd_FFT, PreOpType, IntraOpType, KernelFunction::default_functor_noop_t>(nullptr, r2c_increase_XZ);
                 transform_stage_completed = 1;
-                SetPrecisionAndExectutionMethod<Generic_Fwd_FFT>(nullptr, c2c_fwd_increase_XYZ, pre_op_functor, intra_op_functor);
+                SetPrecisionAndExectutionMethod<Generic_Fwd_FFT, PreOpType, IntraOpType, KernelFunction::default_functor_noop_t>(nullptr, c2c_fwd_increase_XYZ);
                 transform_stage_completed = 2;
-                SetPrecisionAndExectutionMethod<Generic_Fwd_FFT>(nullptr, c2c_fwd_increase, pre_op_functor, intra_op_functor);
+                SetPrecisionAndExectutionMethod<Generic_Fwd_FFT, PreOpType, IntraOpType, KernelFunction::default_functor_noop_t>(nullptr, c2c_fwd_increase);
                 transform_stage_completed = 3;
                 break;
             }
@@ -526,8 +514,7 @@ template <class ComputeBaseType, class InputType, class OtherImageType, int Rank
 template <class IntraOpType,
           class PostOpType>
 EnableIf<IsAllowedInputType<InputType>>
-FourierTransformer<ComputeBaseType, InputType, OtherImageType, Rank>::Generic_Inv(IntraOpType intra_op,
-                                                                                  PostOpType  post_op) {
+FourierTransformer<ComputeBaseType, InputType, OtherImageType, Rank>::Generic_Inv( ) {
 
     SetDimensions(DimensionCheckType::InvTransform);
     MyFFTRunTimeAssertFalse(fwd_implicit_dimension_change, "Implicit dimension change not yet supported for InvFFT");
@@ -539,17 +526,17 @@ FourierTransformer<ComputeBaseType, InputType, OtherImageType, Rank>::Generic_In
             if constexpr ( IsAllowedRealType<InputType> ) {
                 switch ( inv_size_change_type ) {
                     case SizeChangeType::no_change: {
-                        SetPrecisionAndExectutionMethod<Generic_Inv_FFT>(nullptr, c2r_none_XY, intra_op, post_op);
+                        SetPrecisionAndExectutionMethod<Generic_Inv_FFT, KernelFunction::default_functor_noop_t, IntraOpType, PostOpType>(nullptr, c2r_none_XY);
                         transform_stage_completed = 5;
                         break;
                     }
                     case SizeChangeType::decrease: {
-                        SetPrecisionAndExectutionMethod<Generic_Inv_FFT>(nullptr, c2r_decrease_XY, intra_op, post_op);
+                        SetPrecisionAndExectutionMethod<Generic_Inv_FFT, KernelFunction::default_functor_noop_t, IntraOpType, PostOpType>(nullptr, c2r_decrease_XY);
                         transform_stage_completed = 5;
                         break;
                     }
                     case SizeChangeType::increase: {
-                        SetPrecisionAndExectutionMethod<Generic_Inv_FFT>(nullptr, c2r_increase, intra_op, post_op);
+                        SetPrecisionAndExectutionMethod<Generic_Inv_FFT, KernelFunction::default_functor_noop_t, IntraOpType, PostOpType>(nullptr, c2r_increase);
                         transform_stage_completed = 5;
                         break;
                     }
@@ -561,17 +548,17 @@ FourierTransformer<ComputeBaseType, InputType, OtherImageType, Rank>::Generic_In
             else {
                 switch ( inv_size_change_type ) {
                     case SizeChangeType::no_change: {
-                        SetPrecisionAndExectutionMethod<Generic_Inv_FFT>(nullptr, c2c_inv_none, intra_op, post_op);
+                        SetPrecisionAndExectutionMethod<Generic_Inv_FFT, KernelFunction::default_functor_noop_t, IntraOpType, PostOpType>(nullptr, c2c_inv_none);
                         transform_stage_completed = 5;
                         break;
                     }
                     case SizeChangeType::decrease: {
-                        SetPrecisionAndExectutionMethod<Generic_Inv_FFT>(nullptr, c2c_inv_decrease, intra_op, post_op);
+                        SetPrecisionAndExectutionMethod<Generic_Inv_FFT, KernelFunction::default_functor_noop_t, IntraOpType, PostOpType>(nullptr, c2c_inv_decrease);
                         transform_stage_completed = 5;
                         break;
                     }
                     case SizeChangeType::increase: {
-                        SetPrecisionAndExectutionMethod<Generic_Inv_FFT>(nullptr, c2c_inv_increase, intra_op, post_op);
+                        SetPrecisionAndExectutionMethod<Generic_Inv_FFT, KernelFunction::default_functor_noop_t, IntraOpType, PostOpType>(nullptr, c2c_inv_increase);
                         transform_stage_completed = 5;
                         break;
                     }
@@ -585,23 +572,23 @@ FourierTransformer<ComputeBaseType, InputType, OtherImageType, Rank>::Generic_In
         case 2: {
             switch ( inv_size_change_type ) {
                 case SizeChangeType::no_change: {
-                    SetPrecisionAndExectutionMethod<Generic_Inv_FFT>(nullptr, c2c_inv_none, intra_op, post_op);
+                    SetPrecisionAndExectutionMethod<Generic_Inv_FFT, KernelFunction::default_functor_noop_t, IntraOpType, PostOpType>(nullptr, c2c_inv_none);
                     transform_stage_completed = 5;
-                    SetPrecisionAndExectutionMethod<Generic_Inv_FFT>(nullptr, c2r_none_XY, intra_op, post_op);
+                    SetPrecisionAndExectutionMethod<Generic_Inv_FFT, KernelFunction::default_functor_noop_t, IntraOpType, PostOpType>(nullptr, c2r_none_XY);
                     transform_stage_completed = 7;
                     break;
                 }
                 case SizeChangeType::increase: {
-                    SetPrecisionAndExectutionMethod<Generic_Inv_FFT>(nullptr, c2c_inv_increase, intra_op, post_op);
+                    SetPrecisionAndExectutionMethod<Generic_Inv_FFT, KernelFunction::default_functor_noop_t, IntraOpType, PostOpType>(nullptr, c2c_inv_increase);
                     transform_stage_completed = 5;
-                    SetPrecisionAndExectutionMethod<Generic_Inv_FFT>(nullptr, c2r_increase, intra_op, post_op);
+                    SetPrecisionAndExectutionMethod<Generic_Inv_FFT, KernelFunction::default_functor_noop_t, IntraOpType, PostOpType>(nullptr, c2r_increase);
                     transform_stage_completed = 7;
                     break;
                 }
                 case SizeChangeType::decrease: {
-                    SetPrecisionAndExectutionMethod<Generic_Inv_FFT>(nullptr, c2c_inv_decrease, intra_op, post_op);
+                    SetPrecisionAndExectutionMethod<Generic_Inv_FFT, KernelFunction::default_functor_noop_t, IntraOpType, PostOpType>(nullptr, c2c_inv_decrease);
                     transform_stage_completed = 5;
-                    SetPrecisionAndExectutionMethod<Generic_Inv_FFT>(nullptr, c2r_decrease_XY, intra_op, post_op);
+                    SetPrecisionAndExectutionMethod<Generic_Inv_FFT, KernelFunction::default_functor_noop_t, IntraOpType, PostOpType>(nullptr, c2r_decrease_XY);
                     transform_stage_completed = 7;
                     break;
                 }
@@ -615,18 +602,18 @@ FourierTransformer<ComputeBaseType, InputType, OtherImageType, Rank>::Generic_In
         case 3: {
             switch ( inv_size_change_type ) {
                 case SizeChangeType::no_change: {
-                    SetPrecisionAndExectutionMethod<Generic_Inv_FFT>(nullptr, c2c_inv_none_XZ, intra_op, post_op);
+                    SetPrecisionAndExectutionMethod<Generic_Inv_FFT, KernelFunction::default_functor_noop_t, IntraOpType, PostOpType>(nullptr, c2c_inv_none_XZ);
                     transform_stage_completed = 5;
-                    SetPrecisionAndExectutionMethod<Generic_Inv_FFT>(nullptr, c2c_inv_none_XYZ, intra_op, post_op);
+                    SetPrecisionAndExectutionMethod<Generic_Inv_FFT, KernelFunction::default_functor_noop_t, IntraOpType, PostOpType>(nullptr, c2c_inv_none_XYZ);
                     transform_stage_completed = 6;
-                    SetPrecisionAndExectutionMethod<Generic_Inv_FFT>(nullptr, c2r_none, intra_op, post_op);
+                    SetPrecisionAndExectutionMethod<Generic_Inv_FFT, KernelFunction::default_functor_noop_t, IntraOpType, PostOpType>(nullptr, c2r_none);
                     transform_stage_completed = 7;
                     break;
                 }
                 case SizeChangeType::increase: {
                     MyFFTRunTimeAssertFalse(true, "3D FFT inv increase not yet supported");
-                    SetPrecisionAndExectutionMethod<Generic_Inv_FFT>(nullptr, r2c_increase_XY, intra_op, post_op);
-                    // SetPrecisionAndExectutionMethod<Generic_Inv_FFT>( nullptr, c2c_fwd_increase_XYZ);
+                    SetPrecisionAndExectutionMethod<Generic_Inv_FFT, KernelFunction::default_functor_noop_t, IntraOpType, PostOpType>(nullptr, r2c_increase_XY);
+                    // SetPrecisionAndExectutionMethod<Generic_Inv_FFT, KernelFunction::default_functor_noop_t, IntraOpType, PostOpType>( nullptr, c2c_fwd_increase_XYZ);
                     break;
                 }
                 case SizeChangeType::decrease: {
@@ -648,10 +635,7 @@ template <class PreOpType,
           class IntraOpType,
           class PostOpType>
 EnableIf<HasIntraOpFunctor<IntraOpType> && IsAllowedInputType<InputType, OtherImageType>>
-FourierTransformer<ComputeBaseType, InputType, OtherImageType, Rank>::Generic_Fwd_Image_Inv(OtherImageType* image_to_search_ptr,
-                                                                                            PreOpType       pre_op_functor,
-                                                                                            IntraOpType     intra_op_functor,
-                                                                                            PostOpType      post_op_functor) {
+FourierTransformer<ComputeBaseType, InputType, OtherImageType, Rank>::Generic_Fwd_Image_Inv(OtherImageType* image_to_search_ptr) {
 
     // Set the member pointer to the passed pointer
     SetDimensions(DimensionCheckType::FwdTransform);
@@ -664,7 +648,7 @@ FourierTransformer<ComputeBaseType, InputType, OtherImageType, Rank>::Generic_Fw
         case 2: {
             switch ( fwd_size_change_type ) {
                 case SizeChangeType::no_change: {
-                    SetPrecisionAndExectutionMethod<Generic_Fwd_FFT>(image_to_search_ptr, r2c_none_XY, pre_op_functor, intra_op_functor, post_op_functor);
+                    SetPrecisionAndExectutionMethod<Generic_Fwd_FFT, PreOpType, IntraOpType, PostOpType>(image_to_search_ptr, r2c_none_XY);
                     transform_stage_completed = 1;
                     switch ( inv_size_change_type ) {
                         case SizeChangeType::no_change: {
@@ -676,9 +660,9 @@ FourierTransformer<ComputeBaseType, InputType, OtherImageType, Rank>::Generic_Fw
                             break;
                         }
                         case SizeChangeType::decrease: {
-                            SetPrecisionAndExectutionMethod<Generic_Fwd_Image_Inv_FFT>(image_to_search_ptr, xcorr_fwd_none_inv_decrease, pre_op_functor, intra_op_functor, post_op_functor);
+                            SetPrecisionAndExectutionMethod<Generic_Fwd_Image_Inv_FFT, PreOpType, IntraOpType, PostOpType>(image_to_search_ptr, xcorr_fwd_none_inv_decrease);
                             transform_stage_completed = 5;
-                            SetPrecisionAndExectutionMethod<Generic_Inv_FFT>(image_to_search_ptr, c2r_decrease_XY, pre_op_functor, intra_op_functor, post_op_functor);
+                            SetPrecisionAndExectutionMethod<Generic_Inv_FFT, PreOpType, IntraOpType, PostOpType>(image_to_search_ptr, c2r_decrease_XY);
                             transform_stage_completed = 7;
                             break;
                         }
@@ -690,13 +674,13 @@ FourierTransformer<ComputeBaseType, InputType, OtherImageType, Rank>::Generic_Fw
                     break;
                 } // case fwd no change
                 case SizeChangeType::increase: {
-                    SetPrecisionAndExectutionMethod<Generic_Fwd_FFT>(image_to_search_ptr, r2c_increase_XY, pre_op_functor, intra_op_functor, post_op_functor);
+                    SetPrecisionAndExectutionMethod<Generic_Fwd_FFT, PreOpType, IntraOpType, PostOpType>(image_to_search_ptr, r2c_increase_XY);
                     transform_stage_completed = 1;
                     switch ( inv_size_change_type ) {
                         case SizeChangeType::no_change: {
-                            SetPrecisionAndExectutionMethod<Generic_Fwd_Image_Inv_FFT>(image_to_search_ptr, generic_fwd_increase_op_inv_none, pre_op_functor, intra_op_functor, post_op_functor);
+                            SetPrecisionAndExectutionMethod<Generic_Fwd_Image_Inv_FFT, PreOpType, IntraOpType, PostOpType>(image_to_search_ptr, generic_fwd_increase_op_inv_none);
                             transform_stage_completed = 5;
-                            SetPrecisionAndExectutionMethod<Generic_Inv_FFT>(image_to_search_ptr, c2r_none_XY, pre_op_functor, intra_op_functor, post_op_functor);
+                            SetPrecisionAndExectutionMethod<Generic_Inv_FFT, PreOpType, IntraOpType, PostOpType>(image_to_search_ptr, c2r_none_XY);
                             transform_stage_completed = 7;
                             break;
                         }
@@ -723,13 +707,13 @@ FourierTransformer<ComputeBaseType, InputType, OtherImageType, Rank>::Generic_Fw
                 }
                 case SizeChangeType::decrease: {
 
-                    SetPrecisionAndExectutionMethod<Generic_Fwd_FFT>(image_to_search_ptr, r2c_decrease_XY, pre_op_functor, intra_op_functor, post_op_functor);
+                    SetPrecisionAndExectutionMethod<Generic_Fwd_FFT, PreOpType, IntraOpType, PostOpType>(image_to_search_ptr, r2c_decrease_XY);
                     transform_stage_completed = 1;
                     switch ( inv_size_change_type ) {
                         case SizeChangeType::no_change: {
-                            SetPrecisionAndExectutionMethod<Generic_Fwd_Image_Inv_FFT>(image_to_search_ptr, generic_fwd_increase_op_inv_none, pre_op_functor, intra_op_functor, post_op_functor);
+                            SetPrecisionAndExectutionMethod<Generic_Fwd_Image_Inv_FFT, PreOpType, IntraOpType, PostOpType>(image_to_search_ptr, generic_fwd_increase_op_inv_none);
                             transform_stage_completed = 5;
-                            SetPrecisionAndExectutionMethod<Generic_Inv_FFT>(image_to_search_ptr, c2r_none_XY, pre_op_functor, intra_op_functor, post_op_functor);
+                            SetPrecisionAndExectutionMethod<Generic_Inv_FFT, PreOpType, IntraOpType, PostOpType>(image_to_search_ptr, c2r_none_XY);
                             transform_stage_completed = 7;
                             break;
                         }
@@ -776,19 +760,19 @@ FourierTransformer<ComputeBaseType, InputType, OtherImageType, Rank>::Generic_Fw
                     break;
                 }
                 case SizeChangeType::increase: {
-                    SetPrecisionAndExectutionMethod<Generic_Fwd_FFT>(image_to_search_ptr, r2c_increase_XZ, pre_op_functor, intra_op_functor, post_op_functor);
+                    SetPrecisionAndExectutionMethod<Generic_Fwd_FFT, PreOpType, IntraOpType, PostOpType>(image_to_search_ptr, r2c_increase_XZ);
                     transform_stage_completed = 1;
-                    SetPrecisionAndExectutionMethod<Generic_Fwd_FFT>(image_to_search_ptr, c2c_fwd_increase_XYZ, pre_op_functor, intra_op_functor, post_op_functor);
+                    SetPrecisionAndExectutionMethod<Generic_Fwd_FFT, PreOpType, IntraOpType, PostOpType>(image_to_search_ptr, c2c_fwd_increase_XYZ);
                     transform_stage_completed = 2;
                     switch ( inv_size_change_type ) {
                         case SizeChangeType::no_change: {
                             // TODO: will need a kernel for generic_fwd_increase_op_inv_none_XZ
-                            SetPrecisionAndExectutionMethod<Generic_Fwd_Image_Inv_FFT>(image_to_search_ptr, generic_fwd_increase_op_inv_none, pre_op_functor, intra_op_functor, post_op_functor);
+                            SetPrecisionAndExectutionMethod<Generic_Fwd_Image_Inv_FFT, PreOpType, IntraOpType, PostOpType>(image_to_search_ptr, generic_fwd_increase_op_inv_none);
                             transform_stage_completed = 5;
                             // SetPrecisionAndExectutionMethod<Generic_Fwd_Image_Inv_FFT>( image_to_search_ptr, c2c_inv_none_XZ);
-                            SetPrecisionAndExectutionMethod<Generic_Inv_FFT>(image_to_search_ptr, c2c_inv_none_XYZ, pre_op_functor, intra_op_functor, post_op_functor);
+                            SetPrecisionAndExectutionMethod<Generic_Inv_FFT, PreOpType, IntraOpType, PostOpType>(image_to_search_ptr, c2c_inv_none_XYZ);
                             transform_stage_completed = 6;
-                            SetPrecisionAndExectutionMethod<Generic_Inv_FFT>(image_to_search_ptr, c2r_none, pre_op_functor, intra_op_functor, post_op_functor);
+                            SetPrecisionAndExectutionMethod<Generic_Inv_FFT, PreOpType, IntraOpType, PostOpType>(image_to_search_ptr, c2r_none);
                             transform_stage_completed = 7;
                             break;
                         }
@@ -1760,10 +1744,7 @@ template <class ComputeBaseType, class InputType, class OtherImageType, int Rank
 template <int FFT_ALGO_t, class PreOpType, class IntraOpType, class PostOpType>
 EnableIf<IfAppliesIntraOpFunctor_HasIntraOpFunctor<IntraOpType, FFT_ALGO_t>>
 FourierTransformer<ComputeBaseType, InputType, OtherImageType, Rank>::SetPrecisionAndExectutionMethod(OtherImageType* other_image_ptr,
-                                                                                                      KernelType      kernel_type,
-                                                                                                      PreOpType       pre_op_functor,
-                                                                                                      IntraOpType     intra_op_functor,
-                                                                                                      PostOpType      post_op_functor) {
+                                                                                                      KernelType      kernel_type) {
     // For kernels with fwd and inv transforms, we want to not set the direction yet.
 
     static const bool is_half  = std::is_same_v<ComputeBaseType, __half>; // FIXME: This should be done in the constructor
@@ -1774,38 +1755,29 @@ FourierTransformer<ComputeBaseType, InputType, OtherImageType, Rank>::SetPrecisi
     }
 
     using FFT = decltype(Block( ) + Precision<ComputeBaseType>( ) + FFTsPerBlock<1>( ));
-    SetIntraKernelFunctions<FFT_ALGO_t, FFT, PreOpType, IntraOpType, PostOpType>(other_image_ptr, kernel_type, pre_op_functor, intra_op_functor, post_op_functor);
+    SetIntraKernelFunctions<FFT_ALGO_t, FFT, PreOpType, IntraOpType, PostOpType>(other_image_ptr, kernel_type);
 }
 
 template <class ComputeBaseType, class InputType, class OtherImageType, int Rank>
 template <int FFT_ALGO_t, class FFT_base, class PreOpType, class IntraOpType, class PostOpType>
 void FourierTransformer<ComputeBaseType, InputType, OtherImageType, Rank>::SetIntraKernelFunctions(OtherImageType* other_image_ptr,
-                                                                                                   KernelType      kernel_type,
-                                                                                                   PreOpType       pre_op_functor,
-                                                                                                   IntraOpType     intra_op_functor,
-                                                                                                   PostOpType      post_op_functor) {
+                                                                                                   KernelType      kernel_type) {
 
-    SelectSizeAndType<FFT_ALGO_t, FFT_base, PreOpType, IntraOpType, PostOpType, FastFFT_build_sizes>(other_image_ptr, kernel_type, pre_op_functor, intra_op_functor, post_op_functor);
+    SelectSizeAndType<FFT_ALGO_t, FFT_base, PreOpType, IntraOpType, PostOpType, FastFFT_build_sizes>(other_image_ptr, kernel_type);
 }
 
 template <class ComputeBaseType, class InputType, class OtherImageType, int Rank>
 template <int FFT_ALGO_t, class FFT_base, class PreOpType, class IntraOpType, class PostOpType, unsigned int... SizeValues>
 void FourierTransformer<ComputeBaseType, InputType, OtherImageType, Rank>::SelectSizeAndType(OtherImageType* other_image_ptr,
-                                                                                             KernelType      kernel_type,
-                                                                                             PreOpType       pre_op_functor,
-                                                                                             IntraOpType     intra_op_functor,
-                                                                                             PostOpType      post_op_functor) {
+                                                                                             KernelType      kernel_type) {
 
-    (SelectSizeAndTypeWithFold<FFT_ALGO_t, FFT_base, PreOpType, IntraOpType, PostOpType, SizeValues>(other_image_ptr, kernel_type, pre_op_functor, intra_op_functor, post_op_functor), ...);
+    (SelectSizeAndTypeWithFold<FFT_ALGO_t, FFT_base, PreOpType, IntraOpType, PostOpType, SizeValues>(other_image_ptr, kernel_type), ...);
 }
 
 template <class ComputeBaseType, class InputType, class OtherImageType, int Rank>
 template <int FFT_ALGO_t, class FFT_base, class PreOpType, class IntraOpType, class PostOpType, unsigned int SizeValue>
 void FourierTransformer<ComputeBaseType, InputType, OtherImageType, Rank>::SelectSizeAndTypeWithFold(OtherImageType* other_image_ptr,
-                                                                                                     KernelType      kernel_type,
-                                                                                                     PreOpType       pre_op_functor,
-                                                                                                     IntraOpType     intra_op_functor,
-                                                                                                     PostOpType      post_op_functor) {
+                                                                                                     KernelType      kernel_typer) {
 
     // Use recursion to step through the allowed sizes.
     GetTransformSize(kernel_type);
@@ -1817,21 +1789,21 @@ void FourierTransformer<ComputeBaseType, InputType, OtherImageType, Rank>::Selec
         switch ( device_properties.device_arch ) {
             case 700: {
                 using FFT = decltype(FFT_base( ) + Size<SizeValue>( ) + SM<700>( ) + ElementsPerThread<Ept>( ));
-                SetAndLaunchKernel<FFT_ALGO_t, FFT, PreOpType, IntraOpType, PostOpType>(other_image_ptr, kernel_type, pre_op_functor, intra_op_functor, post_op_functor);
+                SetAndLaunchKernel<FFT_ALGO_t, FFT, PreOpType, IntraOpType, PostOpType>(other_image_ptr, kernel_type);
                 break;
             }
             case 750: {
 
                 if constexpr ( SizeValue <= 4096 ) {
                     using FFT = decltype(FFT_base( ) + Size<SizeValue>( ) + SM<750>( ) + ElementsPerThread<Ept>( ));
-                    SetAndLaunchKernel<FFT_ALGO_t, FFT, PreOpType, IntraOpType, PostOpType>(other_image_ptr, kernel_type, pre_op_functor, intra_op_functor, post_op_functor);
+                    SetAndLaunchKernel<FFT_ALGO_t, FFT, PreOpType, IntraOpType, PostOpType>(other_image_ptr, kernel_type);
                 }
                 break;
             }
             case 800: {
 
                 using FFT = decltype(FFT_base( ) + Size<SizeValue>( ) + SM<800>( ) + ElementsPerThread<Ept>( ));
-                SetAndLaunchKernel<FFT_ALGO_t, FFT, PreOpType, IntraOpType, PostOpType>(other_image_ptr, kernel_type, pre_op_functor, intra_op_functor, post_op_functor);
+                SetAndLaunchKernel<FFT_ALGO_t, FFT, PreOpType, IntraOpType, PostOpType>(other_image_ptr, kernel_type);
                 break;
             }
             case 860: {
@@ -1839,7 +1811,7 @@ void FourierTransformer<ComputeBaseType, InputType, OtherImageType, Rank>::Selec
                 // TODO: confirm that this is needed (over 860) which at the time just redirects to 700
                 //       if maintining this, we could save some time on compilation by combining with the 700 case
                 using FFT = decltype(FFT_base( ) + Size<SizeValue>( ) + SM<700>( ) + ElementsPerThread<Ept>( ));
-                SetAndLaunchKernel<FFT_ALGO_t, FFT, PreOpType, IntraOpType, PostOpType>(other_image_ptr, kernel_type, pre_op_functor, intra_op_functor, post_op_functor);
+                SetAndLaunchKernel<FFT_ALGO_t, FFT, PreOpType, IntraOpType, PostOpType>(other_image_ptr, kernel_type);
                 break;
             }
             case 890: {
@@ -1849,7 +1821,7 @@ void FourierTransformer<ComputeBaseType, InputType, OtherImageType, Rank>::Selec
                 // FIXME: on migrating to cufftDx 1.1.1
 
                 using FFT = decltype(FFT_base( ) + Size<SizeValue>( ) + SM<700>( ) + ElementsPerThread<Ept>( ));
-                SetAndLaunchKernel<FFT_ALGO_t, FFT, PreOpType, IntraOpType, PostOpType>(other_image_ptr, kernel_type, pre_op_functor, intra_op_functor, post_op_functor);
+                SetAndLaunchKernel<FFT_ALGO_t, FFT, PreOpType, IntraOpType, PostOpType>(other_image_ptr, kernel_type);
                 break;
             }
             default: {
@@ -1863,10 +1835,7 @@ void FourierTransformer<ComputeBaseType, InputType, OtherImageType, Rank>::Selec
 template <class ComputeBaseType, class InputType, class OtherImageType, int Rank>
 template <int FFT_ALGO_t, class FFT_base_arch, class PreOpType, class IntraOpType, class PostOpType>
 void FourierTransformer<ComputeBaseType, InputType, OtherImageType, Rank>::SetAndLaunchKernel(OtherImageType* other_image_ptr,
-                                                                                              KernelType      kernel_type,
-                                                                                              PreOpType       pre_op_functor,
-                                                                                              IntraOpType     intra_op_functor,
-                                                                                              PostOpType      post_op_functor) {
+                                                                                              KernelType      kernel_type) {
 
     // Used to determine shared memory requirements
     using complex_compute_t = typename FFT_base_arch::value_type;
@@ -2756,10 +2725,7 @@ void FourierTransformer<ComputeBaseType, InputType, OtherImageType, Rank>::SetAn
                                     LP.mem_offsets,
                                     apparent_Q,
                                     workspace_fwd,
-                                    workspace_inv,
-                                    pre_op_functor,
-                                    intra_op_functor,
-                                    post_op_functor);
+                                    workspace_inv);
                             postcheck;
                             current_buffer = fastfft_internal_buffer_2;
                         }
@@ -2773,10 +2739,7 @@ void FourierTransformer<ComputeBaseType, InputType, OtherImageType, Rank>::SetAn
                                     LP.mem_offsets,
                                     apparent_Q,
                                     workspace_fwd,
-                                    workspace_inv,
-                                    pre_op_functor,
-                                    intra_op_functor,
-                                    post_op_functor);
+                                    workspace_inv);
                             postcheck;
                             current_buffer = fastfft_internal_buffer_1;
                         }
@@ -3112,57 +3075,40 @@ void CheckSharedMemory(unsigned int& memory_requested, DeviceProps& dp) {
 }
 
 using namespace FastFFT::KernelFunction;
-// my_functor, IKF_t
 
 // 2d explicit instantiations
 
-// TODO: Pass in functor types
 // TODO: Take another look at the explicit NOOP vs nullptr and determine if it is really needed
-#define INSTANTIATE(COMPUTE_BASE_TYPE, INPUT_TYPE, OTHER_IMAGE_TYPE, RANK)                                                                                                                       \
-    template class FourierTransformer<COMPUTE_BASE_TYPE, INPUT_TYPE, OTHER_IMAGE_TYPE, RANK>;                                                                                                    \
-                                                                                                                                                                                                 \
-    template void FourierTransformer<COMPUTE_BASE_TYPE, INPUT_TYPE, OTHER_IMAGE_TYPE, RANK>::FwdFFT<std::nullptr_t,                                                                              \
-                                                                                                    std::nullptr_t>(INPUT_TYPE*, INPUT_TYPE*, std::nullptr_t, std::nullptr_t);                   \
-                                                                                                                                                                                                 \
-    template void FourierTransformer<COMPUTE_BASE_TYPE, INPUT_TYPE, OTHER_IMAGE_TYPE, RANK>::InvFFT<std::nullptr_t,                                                                              \
-                                                                                                    std::nullptr_t>(INPUT_TYPE*, INPUT_TYPE*, std::nullptr_t, std::nullptr_t);                   \
-                                                                                                                                                                                                 \
-    template void FourierTransformer<COMPUTE_BASE_TYPE, INPUT_TYPE, OTHER_IMAGE_TYPE, RANK>::FwdFFT<my_functor<float, 0, IKF_t::NOOP>,                                                           \
-                                                                                                    my_functor<float, 0, IKF_t::NOOP>>(INPUT_TYPE*,                                              \
-                                                                                                                                       INPUT_TYPE*,                                              \
-                                                                                                                                       my_functor<float, 0, IKF_t::NOOP>,                        \
-                                                                                                                                       my_functor<float, 0, IKF_t::NOOP>);                       \
-                                                                                                                                                                                                 \
-    template void FourierTransformer<COMPUTE_BASE_TYPE, INPUT_TYPE, OTHER_IMAGE_TYPE, RANK>::InvFFT<my_functor<float, 0, IKF_t::NOOP>,                                                           \
-                                                                                                    my_functor<float, 0, IKF_t::NOOP>>(INPUT_TYPE*,                                              \
-                                                                                                                                       INPUT_TYPE*,                                              \
-                                                                                                                                       my_functor<float, 0, IKF_t::NOOP>,                        \
-                                                                                                                                       my_functor<float, 0, IKF_t::NOOP>);                       \
-                                                                                                                                                                                                 \
-    template void FourierTransformer<COMPUTE_BASE_TYPE, INPUT_TYPE, OTHER_IMAGE_TYPE, RANK>::FwdImageInvFFT<my_functor<float, 0, IKF_t::NOOP>,                                                   \
-                                                                                                            my_functor<float, 4, IKF_t::CONJ_MUL>,                                               \
-                                                                                                            my_functor<float, 0, IKF_t::NOOP>>(INPUT_TYPE*,                                      \
-                                                                                                                                               OTHER_IMAGE_TYPE*,                                \
-                                                                                                                                               INPUT_TYPE*,                                      \
-                                                                                                                                               my_functor<float, 0, IKF_t::NOOP>,                \
-                                                                                                                                               my_functor<float, 4, IKF_t::CONJ_MUL>,            \
-                                                                                                                                               my_functor<float, 0, IKF_t::NOOP>);               \
-    template void FourierTransformer<COMPUTE_BASE_TYPE, INPUT_TYPE, OTHER_IMAGE_TYPE, RANK>::FwdImageInvFFT<my_functor<float, 2, IKF_t::SCALE>,                                                  \
-                                                                                                            my_functor<float, 4, IKF_t::CONJ_MUL>,                                               \
-                                                                                                            my_functor<float, 0, IKF_t::NOOP>>(INPUT_TYPE*,                                      \
-                                                                                                                                               OTHER_IMAGE_TYPE*,                                \
-                                                                                                                                               INPUT_TYPE*,                                      \
-                                                                                                                                               my_functor<float, 2, IKF_t::SCALE>,               \
-                                                                                                                                               my_functor<float, 4, IKF_t::CONJ_MUL>,            \
-                                                                                                                                               my_functor<float, 0, IKF_t::NOOP>);               \
-    template void FourierTransformer<COMPUTE_BASE_TYPE, INPUT_TYPE, OTHER_IMAGE_TYPE, RANK>::FwdImageInvFFT<my_functor<float, 0, IKF_t::NOOP>,                                                   \
-                                                                                                            my_functor<float, 4, IKF_t::CONJ_MUL_THEN_SCALE>,                                    \
-                                                                                                            my_functor<float, 0, IKF_t::NOOP>>(INPUT_TYPE*,                                      \
-                                                                                                                                               OTHER_IMAGE_TYPE*,                                \
-                                                                                                                                               INPUT_TYPE*,                                      \
-                                                                                                                                               my_functor<float, 0, IKF_t::NOOP>,                \
-                                                                                                                                               my_functor<float, 4, IKF_t::CONJ_MUL_THEN_SCALE>, \
-                                                                                                                                               my_functor<float, 0, IKF_t::NOOP>);
+#define INSTANTIATE(COMPUTE_BASE_TYPE, INPUT_TYPE, OTHER_IMAGE_TYPE, RANK)                                                                                     \
+    template class FourierTransformer<COMPUTE_BASE_TYPE, INPUT_TYPE, OTHER_IMAGE_TYPE, RANK>;                                                                  \
+                                                                                                                                                               \
+    template void FourierTransformer<COMPUTE_BASE_TYPE, INPUT_TYPE, OTHER_IMAGE_TYPE, RANK>::FwdFFT(INPUT_TYPE*, INPUT_TYPE*);                                 \
+                                                                                                                                                               \
+    template void FourierTransformer<COMPUTE_BASE_TYPE, INPUT_TYPE, OTHER_IMAGE_TYPE, RANK>::InvFFT(INPUT_TYPE*, INPUT_TYPE*);                                 \
+                                                                                                                                                               \
+    template void FourierTransformer<COMPUTE_BASE_TYPE, INPUT_TYPE, OTHER_IMAGE_TYPE, RANK>::FwdFFT<my_functor<float, IKF_t::NOOP>,                            \
+                                                                                                    my_functor<float, IKF_t::NOOP>>(INPUT_TYPE*,               \
+                                                                                                                                    INPUT_TYPE*);              \
+                                                                                                                                                               \
+    template void FourierTransformer<COMPUTE_BASE_TYPE, INPUT_TYPE, OTHER_IMAGE_TYPE, RANK>::InvFFT<my_functor<float, IKF_t::NOOP>,                            \
+                                                                                                    my_functor<float, IKF_t::NOOP>>(INPUT_TYPE*,               \
+                                                                                                                                    INPUT_TYPE*);              \
+                                                                                                                                                               \
+    template void FourierTransformer<COMPUTE_BASE_TYPE, INPUT_TYPE, OTHER_IMAGE_TYPE, RANK>::FwdImageInvFFT<my_functor<float, IKF_t::NOOP>,                    \
+                                                                                                            my_functor<float, IKF_t::CONJ_MUL>,                \
+                                                                                                            my_functor<float, IKF_t::NOOP>>(INPUT_TYPE*,       \
+                                                                                                                                            OTHER_IMAGE_TYPE*, \
+                                                                                                                                            INPUT_TYPE*);      \
+    template void FourierTransformer<COMPUTE_BASE_TYPE, INPUT_TYPE, OTHER_IMAGE_TYPE, RANK>::FwdImageInvFFT<my_functor<float, IKF_t::SCALE>,                   \
+                                                                                                            my_functor<float, IKF_t::CONJ_MUL>,                \
+                                                                                                            my_functor<float, IKF_t::NOOP>>(INPUT_TYPE*,       \
+                                                                                                                                            OTHER_IMAGE_TYPE*, \
+                                                                                                                                            INPUT_TYPE*);      \
+    template void FourierTransformer<COMPUTE_BASE_TYPE, INPUT_TYPE, OTHER_IMAGE_TYPE, RANK>::FwdImageInvFFT<my_functor<float, IKF_t::NOOP>,                    \
+                                                                                                            my_functor<float, IKF_t::CONJ_MUL_THEN_SCALE>,     \
+                                                                                                            my_functor<float, IKF_t::NOOP>>(INPUT_TYPE*,       \
+                                                                                                                                            OTHER_IMAGE_TYPE*, \
+                                                                                                                                            INPUT_TYPE*);
 
 INSTANTIATE(float, float, float2, 2);
 INSTANTIATE(float, __half, float2, 2);

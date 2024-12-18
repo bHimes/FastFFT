@@ -18,9 +18,14 @@
 // #define FastFFT_build_sizes 32, 64, 128, 256, 512, 1024, 2048, 4096
 
 // #define FastFFT_build_sizes 16, 4, 32, 8, 64, 8, 128, 8, 256, 8, 512, 8, 1024, 8, 2048, 8, 4096, 16, 8192, 16
-#define FastFFT_build_sizes 512, 2048
+#define FastFFT_build_sizes 512, 4096
 
 namespace FastFFT {
+
+struct my_functor;
+// We may also want to implicitly use a noop as a default value a function argument
+// only arithmetic types are allowed for the operational functors.
+using default_functor_noop_t = decltype(my_functor<std::nullptr_t, IKF_t::NOOP>);
 
 // TODO: this may be expanded, for now it is to be used in the case where we have
 // packed the real values of a c2r into the first half of the complex array.
@@ -39,6 +44,9 @@ inline void static_no_thread_fft_support_yet( ) { static_assert(flag, "only bloc
 
 template <bool flag = false>
 inline void static_FIXME_maybe_broken( ) { static_assert(flag, "this branch is not confirmed to be working properly."); }
+
+template <bool flag = false>
+inline void static_assert_fft_direction_invalid_for_conversion( ) { static_assert(flag, "static_assert_fft_direction_invalid_for_conversion."); }
 
 // Currently the buffer types match the input type which also determines the output type.
 // The compute and otherImage type are independent.
@@ -177,29 +185,22 @@ class FourierTransformer {
     // TODO: when picking up tomorrow, remove default values for input pointers and move EnableIf to the declarations for the generic functions and instantiate these from fastFFT.cus
     // Following this
     // Alias for FwdFFT, is there any overhead?
-    template <class PreOpType   = std::nullptr_t,
-              class IntraOpType = std::nullptr_t>
-    void FwdFFT(InputType*  input_ptr,
-                InputType*  output_ptr = nullptr,
-                PreOpType   pre_op     = nullptr,
-                IntraOpType intra_op   = nullptr);
+    template <class PreOpType   = KernelFunction::default_functor_noop_t,
+              class IntraOpType = KernelFunction::default_functor_noop_t>
+    void FwdFFT(InputType* input_ptr,
+                InputType* output_ptr = nullptr);
 
-    template <class IntraOpType = std::nullptr_t,
-              class PostOpType  = std::nullptr_t>
-    void InvFFT(InputType*  input_ptr,
-                InputType*  output_ptr = nullptr,
-                IntraOpType intra_op   = nullptr,
-                PostOpType  post_op    = nullptr);
+    template <class IntraOpType = KernelFunction::default_functor_noop_t,
+              class PostOpType  = KernelFunction::default_functor_noop_t>
+    void InvFFT(InputType* input_ptr,
+                InputType* output_ptr = nullptr);
 
-    template <class PreOpType   = std::nullptr_t,
-              class IntraOpType = std::nullptr_t,
-              class PostOpType  = std::nullptr_t>
+    template <class PreOpType   = KernelFunction::default_functor_noop_t,
+              class IntraOpType = KernelFunction::default_functor_noop_t,
+              class PostOpType  = KernelFunction::default_functor_noop_t>
     void FwdImageInvFFT(InputType*      input_ptr,
                         OtherImageType* image_to_search,
-                        InputType*      output_ptr = nullptr,
-                        PreOpType       pre_op     = nullptr,
-                        IntraOpType     intra_op   = nullptr,
-                        PostOpType      post_op    = nullptr);
+                        InputType*      output_ptr = nullptr);
 
     void ClipIntoTopLeft(InputType* input_ptr);
     void ClipIntoReal(InputType*, int wanted_coordinate_of_box_center_x, int wanted_coordinate_of_box_center_y, int wanted_coordinate_of_box_center_z);
@@ -610,13 +611,10 @@ class FourierTransformer {
 
     // 1.
     // First call passed from a public transform function, selects block or thread and the transform precision.
-    template <int FFT_ALGO_t, class PreOpType = std::nullptr_t, class IntraOpType = std::nullptr_t, class PostOpType = std::nullptr_t>
+    template <int FFT_ALGO_t, class PreOpType = KernelFunction::default_functor_noop_t, class IntraOpType = KernelFunction::default_functor_noop_t, class PostOpType = KernelFunction::default_functor_noop_t>
     EnableIf<IfAppliesIntraOpFunctor_HasIntraOpFunctor<IntraOpType, FFT_ALGO_t>>
     SetPrecisionAndExectutionMethod(OtherImageType* other_image_ptr,
-                                    KernelType      kernel_type,
-                                    PreOpType       pre_op_functor   = nullptr,
-                                    IntraOpType     intra_op_functor = nullptr,
-                                    PostOpType      post_op_functor  = nullptr);
+                                    KernelType      kernel_type);
 
     // 2. // TODO: remove this now that the functors are working
     // Check to see if any intra kernel functions are wanted, and if so set the appropriate device pointers.
