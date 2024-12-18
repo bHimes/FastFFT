@@ -223,7 +223,7 @@ __global__ void clip_into_real_kernel(InputType*      real_values_gpu,
 
 // TODO: This would be much cleaner if we could first go from complex_compute_t -> float 2 then do conversions
 // I think since this would be a compile time decision, it would be fine, but it would be good to confirm.
-template <class FFT, typename SetTo_t, typename GetFrom_t, class Functor_t = KernelFunction::default_functor_noop_t>
+template <class FFT, typename SetTo_t, typename GetFrom_t>
 __device__ __forceinline__ void convert_if_needed_and_write(SetTo_t* __restrict__ dst,
                                                             const unsigned int dst_idx,
                                                             const GetFrom_t* __restrict__ src,
@@ -234,16 +234,15 @@ __device__ __forceinline__ void convert_if_needed_and_write(SetTo_t* __restrict_
     constexpr bool is_folded = real_fft_mode_of<FFT>::value == real_mode::folded;
     constexpr bool is_c2r    = type_of<FFT>::value == fft_type::c2r;
 
-    constexpr Functor_t functor{ };
-
     // For now, we are assuming (as everywhere else) that compute precision is never double
     // and may in the future be _half. But is currently only float.
     // FIXME: THis should be caught earlier I think.
-    if constexpr ( std::is_same_v<complex_compute_t, double> )
+    if constexpr ( std::is_same_v<complex_compute_t, double> ) {
         static_no_doubles( );
-
-    if constexpr ( std::is_same_v<complex_compute_t, __half> )
+    }
+    if constexpr ( std::is_same_v<complex_compute_t, __half> ) {
         static_no_half_support_yet( );
+    }
 
     if constexpr ( std::is_same_v<std::decay_t<GetFrom_t>, complex_compute_t> || std::is_same_v<std::decay_t<GetFrom_t>, float2> ) {
         // For everthing in the block, we are pulling from a complex type, and if we have a folded transform it MUST be c2r
@@ -253,51 +252,51 @@ __device__ __forceinline__ void convert_if_needed_and_write(SetTo_t* __restrict_
 
         if constexpr ( std::is_same_v<SetTo_t, scalar_compute_t> ) {
             if constexpr ( is_folded )
-                KernelFunction::callFunctor(functor, reinterpret_cast<complex_compute_t*>(dst)[dst_idx], src[src_idx]);
+                reinterpret_cast<complex_compute_t*>(dst)[dst_idx] = src[src_idx];
             else
-                KernelFunction::callFunctor(functor, dst[dst_idx], reinterpret_cast<const SetTo_t*>(src)[src_idx]); // real part only from complex a + i*0
+                dst[dst_idx] reinterpret_cast<const SetTo_t*>(src)[src_idx]; // real part only from complex a + i*0
         }
         else if constexpr ( std::is_same_v<SetTo_t, float> ) {
             if constexpr ( is_folded )
-                KernelFunction::callFunctor(functor, reinterpret_cast<float2*>(dst)[dst_idx], src[src_idx]);
+                reinterpret_cast<float2*>(dst)[dst_idx] = src[src_idx];
             else
                 dst[dst_idx] = reinterpret_cast<const SetTo_t*>(src)[src_idx]; // real part only from complex a + i*0
         }
         else if constexpr ( std::is_same_v<SetTo_t, __half> ) {
             if constexpr ( is_folded )
-                KernelFunction::callFunctor(functor, reinterpret_cast<__half2*>(dst)[dst_idx], __float22half2_rn(reinterpret_cast<const float2*>(src)[src_idx]));
+                reinterpret_cast<__half2*>(dst)[dst_idx] = __float22half2_rn(reinterpret_cast<const float2*>(src)[src_idx]);
             else
-                KernelFunction::callFunctor(functor, dst[dst_idx], __float2half_rn(reinterpret_cast<const float*>(src)[src_idx])); // real part only from complex a + i*0
+                dst[dst_idx] = __float2half_rn(reinterpret_cast<const float*>(src)[src_idx]); // real part only from complex a + i*0
         }
         else if constexpr ( std::is_same_v<SetTo_t, __half2> ) {
             if constexpr ( is_folded ) {
                 // Note: we will eventually need a similar hase for __nv_bfloat16
                 // I think I may need to strip the const news for this to work
                 if constexpr ( std::is_same_v<GetFrom_t, complex_compute_t> )
-                    KernelFunction::callFunctor(functor, dst[dst_idx], __float22half2_rn(static_cast<const float2*>(src)[src_idx]));
+                    = dst[dst_idx] __float22half2_rn(static_cast<const float2*>(src)[src_idx]);
                 else
-                    KernelFunction::callFunctor(functor, dst[dst_idx], __float22half2_rn(src[src_idx]));
+                    = dst[dst_idx] __float22half2_rn(src[src_idx]);
             }
             else {
                 // Note: we will eventually need a similar hase for __nv_bfloat16
                 // I think I may need to strip the const news for this to work
                 if constexpr ( std::is_same_v<GetFrom_t, complex_compute_t> )
-                    KernelFunction::callFunctor(functor, dst[dst_idx], __floats2half2_rn(src[src_idx].real( ), 0.f));
+                    = dst[dst_idx] __floats2half2_rn(src[src_idx].real( ), 0.f);
                 else
-                    KernelFunction::callFunctor(functor, dst[dst_idx], __floats2half2_rn(static_cast<const float*>(src)[src_idx], 0.f));
+                    = dst[dst_idx] __floats2half2_rn(static_cast<const float*>(src)[src_idx], 0.f);
             }
         }
         else if constexpr ( (std::is_same_v<std::decay_t<GetFrom_t>, complex_compute_t> && std::is_same_v<std::decay_t<SetTo_t>, complex_compute_t>) ||
                             (std::is_same_v<std::decay_t<GetFrom_t>, float2> && std::is_same_v<std::decay_t<SetTo_t>, float2>)) {
-            KernelFunction::callFunctor(functor, dst[dst_idx], src[src_idx]);
+             dst[dst_idx] = src[src_idx]);
         }
         else if constexpr ( std::is_same_v<std::decay_t<GetFrom_t>, complex_compute_t> && std::is_same_v<std::decay_t<SetTo_t>, float2> ) {
             // return std::move(static_cast<const SetTo_t*>(src)[src_idx]);
-            KernelFunction::callFunctor(functor, dst[dst_idx], SetTo_t{src[src_idx].real( ), src[src_idx].imag( )});
+            dst[dst_idx] = SetTo_t{src[src_idx].real( ), src[src_idx].imag( )};
         }
         else if constexpr ( std::is_same_v<std::decay_t<GetFrom_t>, float2> && std::is_same_v<std::decay_t<SetTo_t>, complex_compute_t> ) {
             // return std::move(static_cast<const SetTo_t*>(src)[src_idx]);
-            KernelFunction::callFunctor(functor, dst[dst_idx], SetTo_t{src[src_idx].x, src[src_idx].y});
+            dst[dst_idx] = SetTo_t{src[src_idx].x, src[src_idx].y};
         }
         else {
             static_no_match( );
@@ -306,20 +305,20 @@ __device__ __forceinline__ void convert_if_needed_and_write(SetTo_t* __restrict_
     else if constexpr ( std::is_same_v<std::decay_t<GetFrom_t>, scalar_compute_t> || std::is_same_v<std::decay_t<GetFrom_t>, float> ) {
         if constexpr ( std::is_same_v<SetTo_t, scalar_compute_t> || std::is_same_v<SetTo_t, float> ) {
 
-            KernelFunction::callFunctor(functor, dst[dst_idx], static_cast<const SetTo_t*>(src)[src_idx]);
+            dst[dst_idx] = static_cast<const SetTo_t*>(src)[src_idx];
         }
         else if constexpr ( std::is_same_v<SetTo_t, __half> ) {
             // In this case we assume we have a real valued result, packed into the first half of the complex array
             // TODO: think about cases where we may hit this block unintentionally and how to catch this
-            KernelFunction::callFunctor(functor, dst[dst_idx], __float2half_rn(static_cast<const float*>(src)[src_idx]));
+            dst[dst_idx] = __float2half_rn(static_cast<const float*>(src)[src_idx]);
         }
         else if constexpr ( std::is_same_v<SetTo_t, __half2> ) {
             // Here we assume we are reading a real value and placeing it in a complex array. Could this go sideways?
-            KernelFunction::callFunctor(functor, dst[dst_idx], __floats2half2_rn(static_cast<const float*>(src)[src_idx], 0.f));
+            dst[dst_idx] = __floats2half2_rn(static_cast<const float*>(src)[src_idx], 0.f);
         }
         else if constexpr ( std::is_same_v<std::decay_t<SetTo_t>, complex_compute_t> || std::is_same_v<std::decay_t<SetTo_t>, float2> ) {
             // Here we assume we are reading a real value and placeing it in a complex array. Could this go sideways?
-            KernelFunction::callFunctor(functor, dst[dst_idx], SetTo_t{static_cast<const float*>(src)[src_idx], 0.f});
+            dst[dst_idx] = SetTo_t{static_cast<const float*>(src)[src_idx], 0.f};
         }
         else {
             static_no_match( );
@@ -327,21 +326,21 @@ __device__ __forceinline__ void convert_if_needed_and_write(SetTo_t* __restrict_
     }
     else if constexpr ( std::is_same_v<std::decay_t<GetFrom_t>, __half> ) {
         if constexpr ( std::is_same_v<SetTo_t, scalar_compute_t> || std::is_same_v<SetTo_t, float> ) {
-            KernelFunction::callFunctor(functor, dst[dst_idx], __half2float(src[src_idx]));
+            dst[dst_idx] = __half2float(src[src_idx]);
         }
         else if constexpr ( std::is_same_v<SetTo_t, __half> ) {
             // In this case we assume we have a real valued result, packed into the first half of the complex array
             // TODO: think about cases where we may hit this block unintentionally and how to catch this
-            KernelFunction::callFunctor(functor, dst[dst_idx], static_cast<const SetTo_t*>(src)[src_idx]);
+            dst[dst_idx] = static_cast<const SetTo_t*>(src)[src_idx];
         }
         else if constexpr ( std::is_same_v<SetTo_t, __half2> ) {
             // Here we assume we are reading a real value and placeing it in a complex array. Could this go sideways?
             // FIXME: For some reason CUDART_ZERO_FP16 is not defined even with cuda_fp16.h included
-            KernelFunction::callFunctor(functor, dst[dst_idx], __halves2half2(static_cast<const __half*>(src)[src_idx], __ushort_as_half((unsigned short)0x0000U)));
+            dst[dst_idx] = __halves2half2(static_cast<const __half*>(src)[src_idx], __ushort_as_half((unsigned short)0x0000U));
         }
         else if constexpr ( std::is_same_v<std::decay_t<SetTo_t>, complex_compute_t> || std::is_same_v<std::decay_t<SetTo_t>, float2> ) {
             // Here we assume we are reading a real value and placeing it in a complex array. Could this go sideways?
-            KernelFunction::callFunctor(functor, dst[dst_idx], SetTo_t{__half2float(static_cast<const __half*>(src)[src_idx]), 0.f});
+            dst[dst_idx] = SetTo_t{__half2float(static_cast<const __half*>(src)[src_idx]), 0.f};
         }
         else {
             static_no_match( );
@@ -352,23 +351,23 @@ __device__ __forceinline__ void convert_if_needed_and_write(SetTo_t* __restrict_
         if constexpr ( std::is_same_v<SetTo_t, scalar_compute_t> || std::is_same_v<SetTo_t, float> || std::is_same_v<SetTo_t, __half> ) {
             if ( is_folded ) {
                 if constexpr ( std::is_same_v<SetTo_t, scalar_compute_t> )
-                    KernelFunction::callFunctor(functor, dst[dst_idx], reinterpret_cast<complex_compute_t*>(dst)[src_idx] = __half22float2(static_cast<const __half2*>(src)[src_idx]));
+                    dst[dst_idx] = reinterpret_cast<complex_compute_t*>(dst)[src_idx] = __half22float2(static_cast<const __half2*>(src)[src_idx]);
                 else if ( std::is_same_v<SetTo_t, float> )
-                    KernelFunction::callFunctor(functor, dst[dst_idx], reinterpret_cast<float2*>(dst)[src_idx] = __half22float2(static_cast<const __half2*>(src)[src_idx]));
+                    dst[dst_idx] = reinterpret_cast<float2*>(dst)[src_idx] = __half22float2(static_cast<const __half2*>(src)[src_idx]);
                 else if constexpr ( std::is_same_v<SetTo_t, __half> )
-                    KernelFunction::callFunctor(functor, dst[dst_idx], reinterpret_cast<__half2*>(dst)[src_idx] = static_cast<const __half2*>(src)[src_idx]);
+                    dst[dst_idx] = reinterpret_cast<__half2*>(dst)[src_idx] = static_cast<const __half2*>(src)[src_idx];
             }
             else
-                KernelFunction::callFunctor(functor, dst[dst_idx], SetTo_t{__low2float(static_cast<const __half2*>(src)[src_idx])});
+                dst[dst_idx] = SetTo_t{__low2float(static_cast<const __half2*>(src)[src_idx])};
         }
         else if constexpr ( std::is_same_v<SetTo_t, __half2> ) {
             // Here we assume we are reading a real value and placeing it in a complex array. Could this go sideways?
             // FIXME: For some reason CUDART_ZERO_FP16 is not defined even with cuda_fp16.h included
-            KernelFunction::callFunctor(functor, dst[dst_idx], static_cast<const SetTo_t*>(src)[src_idx]);
+            dst[dst_idx] = static_cast<const SetTo_t*>(src)[src_idx];
         }
         else if constexpr ( std::is_same_v<std::decay_t<SetTo_t>, complex_compute_t> || std::is_same_v<std::decay_t<SetTo_t>, float2> ) {
             // Here we assume we are reading a real value and placeing it in a complex array. Could this go sideways?
-            KernelFunction::callFunctor(functor, dst[dst_idx], SetTo_t{__low2float(static_cast<const __half2*>(src)[src_idx]), __high2float(static_cast<const __half2*>(src)[src_idx])});
+            dst[dst_idx] = SetTo_t{__low2float(static_cast<const __half2*>(src)[src_idx]), __high2float(static_cast<const __half2*>(src)[src_idx])};
         }
         else {
             static_no_match( );
@@ -383,12 +382,10 @@ __device__ __forceinline__ void convert_if_needed_and_write(SetTo_t* __restrict_
 // IO functions adapted from the cufftdx examples
 ///////////////////////////////
 
-template <class FFT, class FunctionType = KernelFunction::default_functor_noop_t>
+template <class FFT>
 struct io {
     using complex_compute_t = typename FFT::value_type;
     using scalar_compute_t  = typename complex_compute_t::value_type;
-
-    static constexpr KernelFunction::default_functor_noop_t dummy_functor( );
 
     /*  For dealing with R2C and C2R we previously included all of the following code in each method:
             constexpr unsigned int threads_per_fft        = cufftdx::size_of<FFT>::value / FFT::elements_per_thread;
@@ -704,22 +701,30 @@ struct io {
     }
 
     // TODO: set user lambda to default = false, then get rid of other load_shared
-    template <typename ExternalImage_t>
-    static inline __device__ void load_external_img(const ExternalImage_t* __restrict__ image_to_search,
-                                                    complex_compute_t* __restrict__ thread_data) {
+    template <typename ExternalImage_t, class FunctionType = std::nullptr_t>
+    static inline __device__ void load_shared(const ExternalImage_t* __restrict__ image_to_search,
+                                              complex_compute_t* __restrict__ thread_data,
+                                              FunctionType intra_op_functor = nullptr) {
 
         unsigned int index = threadIdx.x;
-        if constexpr ( std::is_same_v<ExternalImage_t, __half2*> ) {
-            for ( unsigned int i = 0; i < FFT::elements_per_thread; i++ ) {
-                intra_op_functor(thread_data[i].x, thread_data[i].y, __low2float(image_to_search[index]), __high2float(image_to_search[index]));
-                convert_if_needed_and_write<FFT, FunctionType>(thread_data, i,
-                                                               image_to_search, index);
-                index += FFT::stride;
+        if constexpr ( IS_IKF_t<FunctionType>( ) ) {
+            if constexpr ( std::is_same_v<ExternalImage_t, __half2*> ) {
+                for ( unsigned int i = 0; i < FFT::elements_per_thread; i++ ) {
+                    intra_op_functor(thread_data[i].x, thread_data[i].y, __low2float(image_to_search[index]), __high2float(image_to_search[index]));
+                    index += FFT::stride;
+                }
+            }
+            else {
+                for ( unsigned int i = 0; i < FFT::elements_per_thread; i++ ) {
+                    intra_op_functor(thread_data[i].x, thread_data[i].y, image_to_search[index].x, image_to_search[index].y);
+                    index += FFT::stride;
+                }
             }
         }
         else {
             for ( unsigned int i = 0; i < FFT::elements_per_thread; i++ ) {
-                intra_op_functor(thread_data[i].x, thread_data[i].y, image_to_search[index].x, image_to_search[index].y);
+                // a * conj b
+                thread_data[i] = thread_data[i], image_to_search[index];
                 index += FFT::stride;
             }
         }
@@ -727,9 +732,8 @@ struct io {
 
     // Now we need send to shared mem and transpose on the way
     // TODO: fix bank conflicts later.
-    static inline __device__ void
-    transpose_r2c_in_shared_XZ(complex_compute_t* __restrict__ shared_mem,
-                               complex_compute_t* __restrict__ thread_data) {
+    static inline __device__ void transpose_r2c_in_shared_XZ(complex_compute_t* __restrict__ shared_mem,
+                                                             complex_compute_t* __restrict__ thread_data) {
 
         unsigned int index = threadIdx.x;
         for ( unsigned int i = 0; i < FFT::elements_per_thread / 2; i++ ) {
@@ -943,39 +947,97 @@ struct io {
     }
 
     //  TODO: set pre_op_functor to default=false and get rid of other load
-    template <typename data_io_t>
+    template <typename data_io_t, class FunctionType = std::nullptr_t>
     static inline __device__ void load(const data_io_t* __restrict__ input,
                                        complex_compute_t* __restrict__ thread_data,
-                                       int last_index_to_load) {
+                                       int          last_index_to_load,
+                                       FunctionType pre_op_functor = nullptr) {
 
         unsigned int index = threadIdx.x;
         // FIXME: working out how to use these functors and this is NOT what is intended
+        if constexpr ( IS_IKF_t<FunctionType>( ) ) {
+            float2 temp;
+            for ( unsigned int i = 0; i < FFT::elements_per_thread; i++ ) {
+                if ( index < last_index_to_load ) {
+                    temp           = pre_op_functor(convert_if_needed<FFT, float2>(input, index));
+                    thread_data[i] = convert_if_needed<FFT, complex_compute_t>(&temp, 0);
+                }
+                else {
+                    // thread_data[i] = complex_compute_t{0.0f, 0.0f};
+                    temp           = pre_op_functor(float2{0.0f, 0.0f});
+                    thread_data[i] = convert_if_needed<FFT, complex_compute_t>(&temp, 0);
+                }
+
+                index += FFT::stride;
+            }
+        }
+        else {
+            for ( unsigned int i = 0; i < FFT::elements_per_thread; i++ ) {
+                if ( index < last_index_to_load )
+                    thread_data[i] = convert_if_needed<FFT, complex_compute_t>(input, index);
+                else
+                    thread_data[i] = complex_compute_t{0.0f, 0.0f};
+                index += FFT::stride;
+            }
+        }
+    }
+
+    static inline __device__ void store_and_swap_quadrants(const complex_compute_t* __restrict__ thread_data,
+                                                           complex_compute_t* __restrict__ output,
+                                                           int first_negative_index) {
+
+        unsigned int      index = threadIdx.x;
+        complex_compute_t phase_shift;
+        int               logical_y;
         for ( unsigned int i = 0; i < FFT::elements_per_thread; i++ ) {
-            if ( index < last_index_to_load ) {
-                convert_if_needed_and_write<FFT, FunctionType>(thread_data, i,
-                                                               input, index);
-            }
-            else {
-                // thread_data[i] = complex_compute_t{0.0f, 0.0f};
-                float2 temp{ };
-                convert_if_needed_and_write<FFT, FunctionType>(thread_data, i,
-                                                               &temp, 0);
-            }
+            // If no kernel based changes are made to source_idx, this will be the same as the original index value
+            phase_shift = thread_data[i];
+            logical_y   = index;
+            if ( logical_y >= first_negative_index )
+                logical_y -= 2 * first_negative_index;
+            if ( (int(blockIdx.y) + logical_y) % 2 != 0 )
+                phase_shift *= -1.f;
+            output[index] = phase_shift;
             index += FFT::stride;
         }
     }
 
-    template <typename data_io_t>
+    static inline __device__ void store_and_swap_quadrants(const complex_compute_t* __restrict__ thread_data,
+                                                           complex_compute_t* __restrict__ output,
+                                                           int* __restrict__ source_idx,
+                                                           int first_negative_index) {
+
+        complex_compute_t phase_shift;
+        int               logical_y;
+        for ( unsigned int i = 0; i < FFT::elements_per_thread; i++ ) {
+            // If no kernel based changes are made to source_idx, this will be the same as the original index value
+            phase_shift = thread_data[i];
+            logical_y   = source_idx[i];
+            if ( logical_y >= first_negative_index )
+                logical_y -= 2 * first_negative_index;
+            if ( (int(blockIdx.y) + logical_y) % 2 != 0 )
+                phase_shift *= -1.f;
+            output[source_idx[i]] = phase_shift;
+        }
+    }
+
+    template <typename data_io_t, class FunctionType = std::nullptr_t>
     static inline __device__ void store(const complex_compute_t* __restrict__ thread_data,
-                                        data_io_t* __restrict__ output) {
+                                        data_io_t* __restrict__ output,
+                                        FunctionType post_op_functor = nullptr) {
 
         unsigned int index = threadIdx.x;
-        for ( unsigned int i = 0; i < FFT::elements_per_thread; i++ ) {
-            convert_if_needed_and_write<FFT, FunctionType>(output, index,
-                                                           thread_data, i);
-            // output[index] = post_op_functor(convert_if_needed_and_write<FFT>(&temp, 0,
-            //                                                                  thread_data, i));
-            index += FFT::stride;
+        if constexpr ( IS_IKF_t<FunctionType>( ) ) {
+            for ( unsigned int i = 0; i < FFT::elements_per_thread; i++ ) {
+                output[index] = post_op_functor(convert_if_needed<FFT, data_io_t>(thread_data, i));
+                index += FFT::stride;
+            }
+        }
+        else {
+            for ( unsigned int i = 0; i < FFT::elements_per_thread; i++ ) {
+                output[index] = convert_if_needed<FFT, data_io_t>(thread_data, i);
+                index += FFT::stride;
+            }
         }
     }
 
