@@ -900,36 +900,41 @@ struct io {
 
         const unsigned int lane_idx = get_lane_id( ); // We may have threads coming from x/y so we get the lane ide from special reg, which could be a tiny bit slower, but more dependible than : threadIdx.x & 31;
         // This should be safe b/c if blockDim.x >= 32 we should have blockDim.y = 1, For now, I have an assert prior to the kernel launch to save overhead
-        const unsigned int warp_idx = threadIdx.x / 32;
+        const unsigned int warp_idx        = threadIdx.x / 32;
+        const unsigned int logical_x_in_1d = (threadIdx.x & 31);
         // Normally we would have a gridDim.y = pixel_pitch, but since here we have reduced the number of blocks to
         // pixel_pitch / n_coalesced_ffts,
         const unsigned int tile_idx_x = lane_idx % (n_coalesced_ffts * read_multiplier);
         const unsigned int physical_x = tile_idx_x + (blockIdx.y * n_coalesced_ffts * read_multiplier);
 
-        constexpr unsigned int n_scalar_vals_to_be_consumed  = 32 / n_coalesced_ffts;
-        constexpr unsigned int n_complex_vals_to_be_consumed = 16 / n_coalesced_ffts;
-        constexpr unsigned int n_consumers_per_read          = n_complex_vals_to_be_consumed / 2;
-        constexpr unsigned int n_sub_warp_blocks             = 32 / n_complex_vals_to_be_consumed; // also pitch in elements for the tile
-        constexpr float        no_val                        = scalar_compute_t{-std::numeric_limits<float>::max( )};
-        const unsigned int     expected_reads_per_i          = blockDim.x; // also can get at compile time
+        constexpr unsigned int tile_size_y             = 16 / n_coalesced_ffts; // # threads in each dimension 4
+        constexpr unsigned int tile_size_x             = 32 / tile_size_y; // 8
+        constexpr unsigned int n_complex_vals_per_read = tile_size_y / 2; // 2
+        constexpr unsigned int n_sub_warp_blocks       = 32 / n_complex_vals_per_read; // also pitch in elements for the tile 16
+        constexpr float        no_val                  = scalar_compute_t{-std::numeric_limits<float>::max( )};
+        const unsigned int     expected_reads_per_i    = blockDim.x; // also can get at compile time 4 (8 threads in y)
 
         // In the normal implemenation there is only on read per loop, and every thread is both a producer and a consumer.
         // so for 64 with 8 ept, there are 8 threads and a stride of 8 In this implementation there is a minimum of 32 threads, so
-        //
+        //revert FFT::input_ept
         for ( unsigned int i = 0; i < FFT::input_ept; i++ ) {
 
-            unsigned int physical_y_in_warp = lane_idx / (read_multiplier * n_coalesced_ffts);
-            // All reads need to be within the warp to use shfl_sync, so we need to break up the input data into 2d blocks
-            for ( unsigned int warp_stride = 0; warp_stride < std::min(std::max(1u, expected_reads_per_i / n_sub_warp_blocks), n_sub_warp_blocks); warp_stride++ ) {
-
+            unsigned int physical_y_in_warp      = lane_idx / tile_size_x; // 0 1 2 3
+            unsigned int base_physical_y_in_warp = physical_y_in_warp;
+            // All reads need to be within the warp to use shfl_sync, so we need to break up the input data into 2d blocks,
+            for ( unsigned int i_tile = 0; i_tile < std::min(std::max(1u, expected_reads_per_i / n_complex_vals_per_read), n_sub_warp_blocks); i_tile++ ) {
+                // 4 / 2 = 2, min(2, 16) = 2
                 // read in as floats
                 unsigned int read_from_data_index = (physical_y_in_warp + warp_idx * 32) + i * FFT::stride;
-                const float  read_val =
+                // i0 0: 0 1 2 3
+                //    1: 4 5 6 7
+                // i 1:  4 5 6 7 (8 9 10 11)
+                const float read_val =
                         read_from_data_index < SignalLength ? reinterpret_cast<const float*>(input)[read_from_data_index * pixel_pitch + physical_x] : no_val;
 
-                if ( no_val != read_val )
-                    printf("tidx: %i , tidy: %i , blockIDx.y: %i , read val: %2.2f , lane: %i , i: %i , warp: %i , tile_idx_x: %i , x: %i , y: %i , readidx: %i , n_sub_warp_blocks: %i , n_coalesced_ffts: %i , FFT::input_ept: %i\n",
-                           threadIdx.x, threadIdx.y, blockIdx.y, read_val, lane_idx, i, warp_stride, tile_idx_x, physical_x, physical_y_in_warp, read_from_data_index, n_sub_warp_blocks, n_coalesced_ffts, FFT::input_ept);
+                // if ( no_val != read_val )
+                //     printf("tidx: %i tidy: %i blockIDx.y: %i read val: %2.2f lane: %i i: %i warp: %i tile_idx_x: %i x: %i y: %i readidx: %i n_sub_warp_blocks: %i n_coalesced_ffts: %i FFT::input_ept: %i\n",
+                //            threadIdx.x, threadIdx.y, blockIdx.y, read_val, lane_idx, i, i_tile, tile_idx_x, physical_x, physical_y_in_warp, read_from_data_index, n_sub_warp_blocks, n_coalesced_ffts, FFT::input_ept);
 
                 for ( int i_fft = 0; i_fft < n_coalesced_ffts; i_fft++ ) {
                     // all threads in the warp will now have data and we need to know who gets that data
@@ -940,23 +945,26 @@ struct io {
                     // We may have read in a dummy value if we are beyond the signal length
                     __syncwarp( );
 
-                    unsigned int producer_tidx = i_fft + n_sub_warp_blocks * lane_idx; // prodcuer index should stay the same and is defined by the tile size.
+                    unsigned int producer_tidx = i_fft + 2 * tile_size_x * (base_physical_y_in_warp / 2);
                     float        copied_val    = __shfl_sync(0xFFFFFFFF, read_val, producer_tidx, 32);
 
                     if ( threadIdx.y == 0 &&
-                         (threadIdx.x & 31) >= warp_stride * n_scalar_vals_to_be_consumed &&
-                         (threadIdx.x & 31) < (warp_stride + 1) * n_scalar_vals_to_be_consumed &&
+                         (threadIdx.x & 31) >= i_tile * n_complex_vals_per_read &&
+                         (threadIdx.x & 31) < (i_tile + 1) * n_complex_vals_per_read &&
                          no_val != copied_val ) {
-                        printf("readVal:%3.3f, copiedVal:%3.3f\n", read_val, copied_val);
+                        printf("tidx: %i tidy: %i blockIDx.y: %i read val: %2.2f lane: %i i: %i warp: %i tile_idx_x: %i x: %i y: %i readidx: %i n_sub_warp_blocks: %i n_coalesced_ffts: %i FFT::input_ept: %i\n",
+                               threadIdx.x, threadIdx.y, blockIdx.y, read_val, lane_idx, i, i_tile, tile_idx_x, physical_x, physical_y_in_warp, read_from_data_index, n_sub_warp_blocks, n_coalesced_ffts, FFT::input_ept);
+                        printf("x: %i, y:%i l:%i from: %i, readVal:%3.3f, copiedVal:%3.3f\n", physical_x, base_physical_y_in_warp, producer_tidx, read_val, copied_val);
                         thread_data[thread_data_linear_idx] = copied_val;
                     }
                     __syncwarp( );
-                    copied_val = __shfl_sync(0xFFFFFFFF, read_val, producer_tidx + n_coalesced_ffts, 32);
+                    // n_coalesced_ffts * read_multiplier is just tile pitch which I'm calculting like 4 different ways here
+                    copied_val = __shfl_sync(0xFFFFFFFF, read_val, producer_tidx + tile_size_x, 32);
                     if ( threadIdx.y == 0 &&
-                         (threadIdx.x & 31) >= warp_stride * n_scalar_vals_to_be_consumed &&
-                         (threadIdx.x & 31) < (warp_stride + 1) * n_scalar_vals_to_be_consumed &&
+                         (threadIdx.x & 31) >= i_tile * n_complex_vals_per_read &&
+                         (threadIdx.x & 31) < (i_tile + 1) * n_complex_vals_per_read &&
                          no_val != copied_val ) {
-                        printf("readVal:%3.3f, copiedVal:%3.3f\n", read_val, copied_val);
+                        printf("x: %i, y:%i l:%i from: %i, readVal:%3.3f, copiedVal:%3.3f\n", physical_x, base_physical_y_in_warp, producer_tidx, read_val, copied_val);
                         thread_data[thread_data_linear_idx + 1] = copied_val;
                     }
 
@@ -964,7 +972,7 @@ struct io {
                 }
 
                 // increment the physical y in warp
-                physical_y_in_warp += n_complex_vals_to_be_consumed;
+                physical_y_in_warp += tile_size_y;
             }
         }
     }

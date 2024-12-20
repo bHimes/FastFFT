@@ -1637,6 +1637,7 @@ __launch_bounds__(MAX_TPB) __global__
 
     FastFFT_SMEM complex_compute_t shared_mem[];
 
+    // when C2R_BUFFER_LINES and nthreadsx < 32 this will be wasted on the Y threads, but no biggie
     complex_compute_t thread_data[FFT::storage_size * n_ffts];
 
     // Total concurent FFTs, n-1 in shared and then on in thread data
@@ -1646,7 +1647,7 @@ __launch_bounds__(MAX_TPB) __global__
         // TODO: probably need to check we don't pick a weird odd number or something.
         io<FFT, MAX_TPB, n_ffts>::load_c2r_transposed_coalesced(&input_values[ReturnZplane(gridDim.y, mem_offsets.physical_x_input)],
                                                                 (scalar_compute_t*)thread_data,
-                                                                gridDim.y * n_ffts * 2); // 2 for the complex data
+                                                                gridDim.y * n_ffts * 2);
 //revert
 // // // For loop zero the twiddles don't need to be computed
 // #pragma unroll(n_ffts)
@@ -1671,9 +1672,10 @@ __launch_bounds__(MAX_TPB) __global__
     for ( int i_fft = 0; i_fft < n_ffts; i_fft++ ) {
         // normally  Return1DFFTAddress(mem_offsets.physical_x_output) = pixel_pitch * (blockIdx.y + blockIdx.z * gridDim.y)
         // we reduce the number of blocks in Y by n_ffts, hysical_x = fft_idx + blockIdx.y * n_coalesced_ffts;
-        io<FFT>::store_c2r(&thread_data[i_fft * FFT::storage_size],
-                           &output_values[mem_offsets.physical_x_output *
-                                          ((blockIdx.y * n_ffts + i_fft) + blockIdx.z * gridDim.y)]);
+        if ( threadIdx.y == 0 ) {
+            io<FFT>::store_c2r(&thread_data[i_fft * FFT::storage_size],
+                               &output_values[mem_offsets.physical_x_output * (blockIdx.y * n_ffts + i_fft)]); // FIXME only 2d
+        }
     }
 
 #else
@@ -1865,8 +1867,8 @@ void FourierTransformer<ComputeBaseType, InputType, OtherImageType, Rank>::Selec
 
     // Use recursion to step through the allowed sizes.
     GetTransformSize(kernel_type);
-    // Maybe revert 16 as 4
-    constexpr unsigned int Ept = SizeValue <= 32 ? 4 : SizeValue < 4096 ? 8
+
+    constexpr unsigned int Ept = SizeValue == 16 ? 4 : SizeValue < 4096 ? 8
                                                                         : 16;
     // Note: the size of the input/output may not match the size of the transform, i.e. transform_size.L <= transform_size.P
     if ( SizeValue == transform_size.P ) {
@@ -2615,8 +2617,10 @@ void FourierTransformer<ComputeBaseType, InputType, OtherImageType, Rank>::SetAn
                     int shared_memory = FFT::shared_memory_size;
                     PrintLaunchParameters(LP);
 #ifdef C2R_BUFFER_LINES
-                    constexpr unsigned int n_buffer_lines = size_of<FFT>::value < 64 ? 2 : size_of<FFT>::value < 512 ? 2
-                                                                                                                     : 4;
+                    // neads to be chosen so that 16 / n_buffer_lines >= FFT::stride (blockDim.x)
+                    constexpr unsigned int min_buffer_lines = std::max(16u / FFT::stride, 2u);
+                    constexpr unsigned int n_buffer_lines   = size_of<FFT>::value < 64u ? std::max(min_buffer_lines, 2u) : size_of<FFT>::value < 512 ? std::max(min_buffer_lines, 4u)
+                                                                                                                                                     : std::max(min_buffer_lines, 4u);
                     LP.gridDims.y /= n_buffer_lines;
                     // FIXME assuming we get a multiple of 32
                     constexpr unsigned int max_threads_per_block = FFT::max_threads_per_block < 32 ? 32 / FFT::max_threads_per_block * FFT::max_threads_per_block : FFT::max_threads_per_block;
@@ -2624,6 +2628,7 @@ void FourierTransformer<ComputeBaseType, InputType, OtherImageType, Rank>::SetAn
                         LP.threadsPerBlock.y = 32 / FFT::max_threads_per_block;
                         // TODO: other asserts, but basically, for the buffering we want to have at least 32 threads per block, and we can't modify x
                     }
+                    std::cerr << "min_buffer_lines " << min_buffer_lines << " n_buffer " << n_buffer_lines << std::endl;
 
 #else
 
@@ -2634,6 +2639,7 @@ void FourierTransformer<ComputeBaseType, InputType, OtherImageType, Rank>::SetAn
                     PrintLaunchParameters(LP);
                     std::cout << "n_buffer_lines: " << n_buffer_lines << std::endl;
                     CheckSharedMemory(shared_memory, device_properties);
+
                     // ZeroBufferMemory( );
 
 #if FFT_DEBUG_STAGE > 6
