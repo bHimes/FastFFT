@@ -1625,8 +1625,8 @@ __launch_bounds__(FFT::max_threads_per_block) __global__
     io<FFT>::store_c2r(thread_data, &output_values[Return1DFFTAddress(mem_offsets.physical_x_output)]);
 }
 
-template <class FFT, class InputData_t, class OutputData_t, unsigned int n_ffts>
-__launch_bounds__(FFT::max_threads_per_block) __global__
+template <class FFT, unsigned int MAX_TPB, class InputData_t, class OutputData_t, unsigned int n_ffts>
+__launch_bounds__(MAX_TPB) __global__
         void block_fft_kernel_C2R_NONE_XY(const InputData_t* __restrict__ input_values,
                                           OutputData_t* __restrict__ output_values,
                                           Offsets                      mem_offsets,
@@ -1644,9 +1644,9 @@ __launch_bounds__(FFT::max_threads_per_block) __global__
 #ifdef C2R_BUFFER_LINES
         // we reduce the number of blocks in y by buffer_lines so to get the pitch we need to multiply by the number of blocks
         // TODO: probably need to check we don't pick a weird odd number or something.
-        io<FFT, n_ffts>::load_c2r_transposed_coalesced(&input_values[ReturnZplane(gridDim.y, mem_offsets.physical_x_input)],
-                                                       (scalar_compute_t*)thread_data,
-                                                       gridDim.y);
+        io<FFT, MAX_TPB, n_ffts>::load_c2r_transposed_coalesced(&input_values[ReturnZplane(gridDim.y, mem_offsets.physical_x_input)],
+                                                                (scalar_compute_t*)thread_data,
+                                                                gridDim.y * n_ffts * 2); // 2 for the complex data
 //revert
 // // // For loop zero the twiddles don't need to be computed
 // #pragma unroll(n_ffts)
@@ -2552,7 +2552,7 @@ void FourierTransformer<ComputeBaseType, InputType, OtherImageType, Rank>::SetAn
                     using FFT                = check_ept_t<extended_base>;
 
 #else
-                    using FFT                             = check_ept_t<decltype(FFT_base_arch( ) + Direction<fft_direction::inverse>( ) + Type<fft_type::c2r>( ))>;
+                    using FFT = check_ept_t<decltype(FFT_base_arch( ) + Direction<fft_direction::inverse>( ) + Type<fft_type::c2r>( ))>;
 #endif
 
                     LaunchParams LP = SetLaunchParameters(c2r_none, FFT::elements_per_thread);
@@ -2604,7 +2604,7 @@ void FourierTransformer<ComputeBaseType, InputType, OtherImageType, Rank>::SetAn
                     using FFT                = check_ept_t<extended_base>;
 
 #else
-                    using FFT                             = check_ept_t<decltype(FFT_base_arch( ) + Direction<fft_direction::inverse>( ) + Type<fft_type::c2r>( ))>;
+                    using FFT = check_ept_t<decltype(FFT_base_arch( ) + Direction<fft_direction::inverse>( ) + Type<fft_type::c2r>( ))>;
 #endif
 
                     LaunchParams LP         = SetLaunchParameters(c2r_none_XY, FFT::elements_per_thread);
@@ -2617,8 +2617,17 @@ void FourierTransformer<ComputeBaseType, InputType, OtherImageType, Rank>::SetAn
                     constexpr unsigned int n_buffer_lines = size_of<FFT>::value < 64 ? 2 : size_of<FFT>::value < 512 ? 2
                                                                                                                      : 4;
                     LP.gridDims.y /= n_buffer_lines;
+                    // FIXME assuming we get a multiple of 32
+                    constexpr unsigned int max_threads_per_block = FFT::max_threads_per_block < 32 ? 32 / FFT::max_threads_per_block * FFT::max_threads_per_block : FFT::max_threads_per_block;
+                    if ( max_threads_per_block > FFT::max_threads_per_block ) {
+                        LP.threadsPerBlock.y = 32 / FFT::max_threads_per_block;
+                        // TODO: other asserts, but basically, for the buffering we want to have at least 32 threads per block, and we can't modify x
+                    }
+
 #else
-                    constexpr unsigned int n_buffer_lines = 1;
+
+                    constexpr unsigned int n_buffer_lines        = 1;
+                    constexpr unsigned int max_threads_per_block = FFT::max_threads_per_block;
 #endif
                     // revert
                     PrintLaunchParameters(LP);
@@ -2627,12 +2636,12 @@ void FourierTransformer<ComputeBaseType, InputType, OtherImageType, Rank>::SetAn
                     // ZeroBufferMemory( );
 
 #if FFT_DEBUG_STAGE > 6
-                    cudaErr(cudaFuncSetAttribute((void*)block_fft_kernel_C2R_NONE_XY<FFT, data_buffer_t, data_io_t, n_buffer_lines>, cudaFuncAttributeMaxDynamicSharedMemorySize, shared_memory));
+                    cudaErr(cudaFuncSetAttribute((void*)block_fft_kernel_C2R_NONE_XY<FFT, max_threads_per_block, data_buffer_t, data_io_t, n_buffer_lines>, cudaFuncAttributeMaxDynamicSharedMemorySize, shared_memory));
 
                     if constexpr ( Rank == 1 ) {
                         MyFFTDebugAssertTrue(current_buffer == fastfft_external_input, "current_buffer != fastfft_external_input");
                         precheck;
-                        block_fft_kernel_C2R_NONE_XY<FFT, data_buffer_t, data_io_t, n_buffer_lines><<<LP.gridDims, LP.threadsPerBlock, shared_memory, cudaStreamPerThread>>>(
+                        block_fft_kernel_C2R_NONE_XY<FFT, max_threads_per_block, data_buffer_t, data_io_t, n_buffer_lines><<<LP.gridDims, LP.threadsPerBlock, shared_memory, cudaStreamPerThread>>>(
                                 reinterpret_cast<data_buffer_t*>(d_ptr.external_input),
                                 external_output_ptr,
                                 LP.mem_offsets,
@@ -2646,7 +2655,7 @@ void FourierTransformer<ComputeBaseType, InputType, OtherImageType, Rank>::SetAn
                         if ( current_buffer == fastfft_internal_buffer_1 ) {
                             // Presumably this is intended to be the second step of an InvFFT
                             precheck;
-                            block_fft_kernel_C2R_NONE_XY<FFT, data_buffer_t, data_io_t, n_buffer_lines><<<LP.gridDims, LP.threadsPerBlock, shared_memory, cudaStreamPerThread>>>(
+                            block_fft_kernel_C2R_NONE_XY<FFT, max_threads_per_block, data_buffer_t, data_io_t, n_buffer_lines><<<LP.gridDims, LP.threadsPerBlock, shared_memory, cudaStreamPerThread>>>(
                                     d_ptr.buffer_1,
                                     external_output_ptr,
                                     LP.mem_offsets,
@@ -2656,7 +2665,7 @@ void FourierTransformer<ComputeBaseType, InputType, OtherImageType, Rank>::SetAn
                         else if ( current_buffer == fastfft_internal_buffer_2 ) {
                             // Presumably this is intended to be the last step in a FwdImgInv
                             precheck;
-                            block_fft_kernel_C2R_NONE_XY<FFT, data_buffer_t, data_io_t, n_buffer_lines><<<LP.gridDims, LP.threadsPerBlock, shared_memory, cudaStreamPerThread>>>(
+                            block_fft_kernel_C2R_NONE_XY<FFT, max_threads_per_block, data_buffer_t, data_io_t, n_buffer_lines><<<LP.gridDims, LP.threadsPerBlock, shared_memory, cudaStreamPerThread>>>(
                                     d_ptr.buffer_2,
                                     external_output_ptr,
                                     LP.mem_offsets,
@@ -2680,7 +2689,7 @@ void FourierTransformer<ComputeBaseType, InputType, OtherImageType, Rank>::SetAn
                     using FFT                = check_ept_t<extended_base>;
 
 #else
-                    using FFT                             = check_ept_t<decltype(FFT_base_arch( ) + Direction<fft_direction::inverse>( ) + Type<fft_type::c2r>( ))>;
+                    using FFT                                    = check_ept_t<decltype(FFT_base_arch( ) + Direction<fft_direction::inverse>( ) + Type<fft_type::c2r>( ))>;
 #endif
 
                     LaunchParams LP = SetLaunchParameters(c2r_decrease_XY, FFT::elements_per_thread);

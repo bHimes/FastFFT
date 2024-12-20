@@ -58,6 +58,20 @@ __device__ __forceinline__ unsigned int get_lane_id( ) {
     return ret;
 }
 
+/**
+ * @brief Get the warp id from the special register. WARNING: This is not necessarily the same as threadIdx.x % warpSize
+ * 
+ * This value can change from instruction issue to issue, but is usefule for debugging
+ * 
+ * @return __device__ 
+ */
+__device__ __forceinline__ unsigned int get_warp_id( ) {
+    unsigned ret;
+    asm volatile("mov.u32 %0, %warpid;"
+                 : "=r"(ret));
+    return ret;
+}
+
 // FIXME: warp size should be deined based on arch at comiple time at constants.h
 constexpr unsigned int replaceme_warpSize        = 32;
 constexpr unsigned int replaceme_warpSize_minus1 = 31;

@@ -192,8 +192,8 @@ __launch_bounds__(FFT::max_threads_per_block) __global__
                                        Offsets                      mem_offsets,
                                        typename FFT::workspace_type workspace);
 
-template <class FFT, class InputData_t, class OutputData_t, unsigned int n_ffts = 1>
-__launch_bounds__(FFT::max_threads_per_block) __global__
+template <class FFT, unsigned int MAX_TPB, class InputData_t, class OutputData_t, unsigned int n_ffts = 1>
+__launch_bounds__(MAX_TPB) __global__
         void block_fft_kernel_C2R_NONE_XY(const InputData_t* __restrict__ input_values,
                                           OutputData_t* __restrict__ output_values,
                                           Offsets                      mem_offsets,
@@ -353,7 +353,7 @@ inline __device__ SetTo_t convert_if_needed(const GetFrom_t* __restrict__ ptr, c
 // IO functions adapted from the cufftdx examples
 ///////////////////////////////
 
-template <class FFT, unsigned int n_coalesced_ffts = 1>
+template <class FFT, unsigned int max_threads_per_block = FFT::max_threads_per_block, unsigned int n_coalesced_ffts = 1>
 struct io {
     using complex_compute_t = typename FFT::value_type;
     using scalar_compute_t  = typename complex_compute_t::value_type;
@@ -895,8 +895,12 @@ struct io {
         // Here we assume the input originally gridDim.y * FFT::input_length (complex) and there are blockDim.x = FFT::stride (y,z are 1)
         // We need read multiplier because we can only swap 4 bytes (afaik) so we'll read re/im separately
         constexpr unsigned int read_multiplier = 2; // to make it clear where we are indexing extra because we are reading re/im seperately.
-        const unsigned int     lane_idx        = threadIdx.x & 31;
-        const unsigned int     warp_idx        = threadIdx.x / 32;
+
+        // If we have fewer than
+
+        const unsigned int lane_idx = get_lane_id( ); // We may have threads coming from x/y so we get the lane ide from special reg, which could be a tiny bit slower, but more dependible than : threadIdx.x & 31;
+        // This should be safe b/c if blockDim.x >= 32 we should have blockDim.y = 1, For now, I have an assert prior to the kernel launch to save overhead
+        const unsigned int warp_idx = threadIdx.x / 32;
         // Normally we would have a gridDim.y = pixel_pitch, but since here we have reduced the number of blocks to
         // pixel_pitch / n_coalesced_ffts,
         const unsigned int tile_x     = lane_idx % (n_coalesced_ffts * read_multiplier);
@@ -918,7 +922,6 @@ struct io {
 
                 printf("tidx:%i, blockIDx.y:%i,read val:%2.2f,lane:%i, i:%i, warp:%i, tile_x:%i, x:%i, y:%i, readidx:%i, n_sub_warp_blocks:%i, n_coalesced_ffts:%i, FFT::input_ept:%i\n",
                        threadIdx.x, blockIdx.y, read_val, lane_idx, i, warp_stride, tile_x, physical_x, physical_y_in_warp, read_from_data_index, n_sub_warp_blocks, n_coalesced_ffts, FFT::input_ept);
-
 #pragma unroll(n_coalesced_ffts)
                 for ( int i_fft = 0; i_fft < n_coalesced_ffts; i_fft++ ) {
                     // all threads in the warp will now have data and we need to know who gets that data
@@ -1116,7 +1119,7 @@ struct io {
         for ( unsigned int i = 0; i < FFT::elements_per_thread; i++ ) {
 
             if ( index < memory_limit )
-                output[index] = data_io_t{float(index), -float(index)}; // revert convert_if_needed<FFT, data_io_t>(thread_data, i);
+                output[index] = data_io_t{float(blockIdx.y), -float(blockIdx.y)}; // revert convert_if_needed<FFT, data_io_t>(thread_data, i);
             index += FFT::stride;
         }
     }
