@@ -51,6 +51,29 @@ __device__ __forceinline__ void SINCOS(float arg, float* s, float* c) {
 }
 #endif
 
+__device__ __forceinline__ unsigned int get_lane_id( ) {
+    unsigned ret;
+    asm volatile("mov.u32 %0, %laneid;"
+                 : "=r"(ret));
+    return ret;
+}
+
+// FIXME: warp size should be deined based on arch at comiple time at constants.h
+constexpr unsigned int replaceme_warpSize        = 32;
+constexpr unsigned int replaceme_warpSize_minus1 = 31;
+
+/**
+ * @brief Returns the lane id of the current thread. Calculated as threadIdx.x & (warpSize - 1)
+ * 
+ * This should be the same as threadIdx.x % warpSize
+ * 
+ * @return __device__ 
+ */
+__device__ __forceinline__ unsigned int calc_lane_id( ) {
+
+    return threadIdx.x & replaceme_warpSize_minus1;
+}
+
 } // namespace FastFFT
 
 #endif // __INCLUDE_DETAIL_DEVICE_FUNCTIONS_H__

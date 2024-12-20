@@ -138,6 +138,7 @@ void compare_libraries(std::vector<int> size, FastFFT::SizeChangeType::Enum size
             FT.FwdFFT(FT_buffer);
             // FIXME: the internal buffering scheme doesn't seem to be working as I thought when DEBUGSTAGE = 1
             FT.CopyDeviceToDeviceAndSynchronize(FT_buffer);
+
             FT.InvFFT(FT_buffer);
 
             FT.SetToConstant(FT_output.real_values, FT_output.real_memory_allocated, 0.0f);

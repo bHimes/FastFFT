@@ -18,7 +18,7 @@
 // #define FastFFT_build_sizes 32, 64, 128, 256, 512, 1024, 2048, 4096
 
 // #define FastFFT_build_sizes 16, 4, 32, 8, 64, 8, 128, 8, 256, 8, 512, 8, 1024, 8, 2048, 8, 4096, 16, 8192, 16
-#define FastFFT_build_sizes 512, 2048
+#define FastFFT_build_sizes 16, 32
 
 namespace FastFFT {
 
@@ -641,17 +641,19 @@ class FourierTransformer {
     template <int FFT_ALGO_t, class FFT_base_arch, class PreOpType, class IntraOpType, class PostOpType>
     void SetAndLaunchKernel(OtherImageType* other_image_ptr, KernelType kernel_type, PreOpType pre_op_functor, IntraOpType intra_op_functor, PostOpType post_op_functor);
 
-    short padding_jump_val_;
-    int   input_memory_wanted_;
-    int   fwd_output_memory_wanted_;
-    int   inv_output_memory_wanted_;
-    int   compute_memory_wanted_;
-    int   memory_size_to_copy_;
+    short  padding_jump_val_;
+    int    input_memory_wanted_;
+    int    fwd_output_memory_wanted_;
+    int    inv_output_memory_wanted_;
+    int    compute_memory_wanted_;
+    int    memory_size_to_copy_;
+    size_t n_bytes_allocated{ };
 
     bool input_data_is_on_device;
     bool output_data_is_on_device;
     bool external_image_is_on_device;
     void AllocateBufferMemory( );
+    void ZeroBufferMemory( );
 
     template <class PreOpType,
               class IntraOpType,

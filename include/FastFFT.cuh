@@ -3,6 +3,7 @@
 
 // #define USE_FOLDED_R2C_C2R
 #define USE_FOLDED_C2R
+#define C2R_BUFFER_LINES
 
 #ifndef __INCLUDE_FAST_FFT_CUH__
 #define __INCLUDE_FAST_FFT_CUH__
@@ -191,7 +192,7 @@ __launch_bounds__(FFT::max_threads_per_block) __global__
                                        Offsets                      mem_offsets,
                                        typename FFT::workspace_type workspace);
 
-template <class FFT, class InputData_t, class OutputData_t>
+template <class FFT, class InputData_t, class OutputData_t, unsigned int n_ffts = 1>
 __launch_bounds__(FFT::max_threads_per_block) __global__
         void block_fft_kernel_C2R_NONE_XY(const InputData_t* __restrict__ input_values,
                                           OutputData_t* __restrict__ output_values,
@@ -352,7 +353,7 @@ inline __device__ SetTo_t convert_if_needed(const GetFrom_t* __restrict__ ptr, c
 // IO functions adapted from the cufftdx examples
 ///////////////////////////////
 
-template <class FFT>
+template <class FFT, unsigned int n_coalesced_ffts = 1>
 struct io {
     using complex_compute_t = typename FFT::value_type;
     using scalar_compute_t  = typename complex_compute_t::value_type;
@@ -882,6 +883,69 @@ struct io {
 #endif
     }
 
+#if defined(C2R_BUFFER_LINES) && defined(USE_FOLDED_C2R)
+    // EnableIf<real_fft_mode_of<FFT>::value == real_mode::folded>
+    template <typename data_io_t>
+    static inline __device__ void load_c2r_transposed_coalesced(const data_io_t* __restrict__ input,
+                                                                scalar_compute_t* __restrict__ thread_data,
+                                                                const unsigned int pixel_pitch,
+                                                                const unsigned int SignalLength = FFT::input_length) {
+
+        // Work this in steps toward generality
+        // Here we assume the input originally gridDim.y * FFT::input_length (complex) and there are blockDim.x = FFT::stride (y,z are 1)
+        // We need read multiplier because we can only swap 4 bytes (afaik) so we'll read re/im separately
+        constexpr unsigned int read_multiplier = 2; // to make it clear where we are indexing extra because we are reading re/im seperately.
+        const unsigned int     lane_idx        = threadIdx.x & 31;
+        const unsigned int     warp_idx        = threadIdx.x / 32;
+        // Normally we would have a gridDim.y = pixel_pitch, but since here we have reduced the number of blocks to
+        // pixel_pitch / n_coalesced_ffts,
+        const unsigned int tile_x     = lane_idx % (n_coalesced_ffts * read_multiplier);
+        const unsigned int physical_x = tile_x + (blockIdx.y * n_coalesced_ffts * read_multiplier);
+
+        constexpr unsigned int n_active_threads_y = 16 / n_coalesced_ffts;
+        constexpr unsigned int n_sub_warp_blocks  = 32 / n_active_threads_y;
+
+        // Loop over the data as if it were real-values N * 2*(N/2+1) (TODO: optionally save packed data from C2C so it is just N * N)
+        for ( unsigned int i = 0; i < FFT::input_ept; i++ ) {
+            unsigned int physical_y_in_warp = lane_idx / (read_multiplier * n_coalesced_ffts);
+            // All reads need to be within the warp to use shfl_sync, so we need to break up the input data into 2d blocks
+            for ( unsigned int warp_stride = 0; warp_stride < n_sub_warp_blocks; warp_stride++ ) {
+
+                // read in as floats
+                unsigned int read_from_data_index = (physical_y_in_warp + warp_idx * 32);
+                const float  read_val =
+                        read_from_data_index < SignalLength ? reinterpret_cast<const float*>(input)[read_from_data_index * pixel_pitch + physical_x] : scalar_compute_t{3.141f};
+
+                printf("tidx:%i, blockIDx.y:%i,read val:%2.2f,lane:%i, i:%i, warp:%i, tile_x:%i, x:%i, y:%i, readidx:%i, n_sub_warp_blocks:%i, n_coalesced_ffts:%i, FFT::input_ept:%i\n",
+                       threadIdx.x, blockIdx.y, read_val, lane_idx, i, warp_stride, tile_x, physical_x, physical_y_in_warp, read_from_data_index, n_sub_warp_blocks, n_coalesced_ffts, FFT::input_ept);
+
+#pragma unroll(n_coalesced_ffts)
+                for ( int i_fft = 0; i_fft < n_coalesced_ffts; i_fft++ ) {
+                    // all threads in the warp will now have data and we need to know who gets that data
+                    // this will result in some threads calculating something they don't need, but thats free
+                    unsigned int real_val_from_thread = i_fft + n_sub_warp_blocks * lane_idx;
+                    float        copied_val           = __shfl_sync(0xFFFFFFFF, read_val, real_val_from_thread, 32);
+                    // fft in the linear storage = FFT::storage_size * i_fft * 2 (2 because we are reading as floats)
+                    // + 2 * i (2 because we are reading as floats)
+                    unsigned int thread_data_linear_idx = read_multiplier * (FFT::storage_size * i_fft + i);
+                    if ( lane_idx >= warp_stride * n_active_threads_y &&
+                         lane_idx < (warp_stride + 1) * n_active_threads_y ) {
+                        thread_data[thread_data_linear_idx] = copied_val;
+                    }
+
+                    copied_val = __shfl_sync(0xFFFFFFFF, read_val, real_val_from_thread + n_coalesced_ffts, 32);
+                    if ( lane_idx >= warp_stride * n_active_threads_y &&
+                         lane_idx < (warp_stride + 1) * n_active_threads_y ) {
+                        thread_data[thread_data_linear_idx + 1] = copied_val;
+                    }
+                }
+                // increment the physical y in warp
+                physical_y_in_warp += n_active_threads_y;
+            }
+        }
+    }
+#endif
+
     static inline __device__ void load_c2r_shared_and_pad(const complex_compute_t* __restrict__ input,
                                                           complex_compute_t* __restrict__ shared_mem,
                                                           const unsigned int pixel_pitch) {
@@ -1044,15 +1108,15 @@ struct io {
         __syncthreads( );
     }
 
-    template <typename data_io_t>
+    template <unsigned int memory_limit, typename data_io_t>
     static inline __device__ void store(const complex_compute_t* __restrict__ thread_data,
-                                        data_io_t* __restrict__ output,
-                                        unsigned int memory_limit) {
+                                        data_io_t* __restrict__ output) {
 
         unsigned int index = threadIdx.x;
         for ( unsigned int i = 0; i < FFT::elements_per_thread; i++ ) {
+
             if ( index < memory_limit )
-                output[index] = convert_if_needed<FFT, data_io_t>(thread_data, i);
+                output[index] = data_io_t{float(index), -float(index)}; // revert convert_if_needed<FFT, data_io_t>(thread_data, i);
             index += FFT::stride;
         }
     }

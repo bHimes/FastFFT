@@ -38,7 +38,11 @@ struct check_and_set_ept {
 // FIXME: The same logic should be added to USE_SUPPLIED_EPT
 // FIXME: THE SAME logic should be applied if USE_FOLDED_R2C is implemented
 #ifdef USE_FOLDED_C2R
+#ifdef C2R_BUFFER_LINES
+    using check_ept = std::conditional_t<type_of<Description>::value == fft_type::c2r, cufftdx::replace_t<Description, ElementsPerThread<8>>, Description>;
+#else
     using check_ept = std::conditional_t<type_of<Description>::value == fft_type::c2r, cufftdx::replace_t<Description, ElementsPerThread<Description::elements_per_thread * c2r_multiplier>>, Description>;
+#endif // buffer lines
 #else
     using check_ept = Description;
 #endif
@@ -153,6 +157,10 @@ void FourierTransformer<ComputeBaseType, InputType, OtherImageType, Rank>::Deall
         precheck;
         cudaErr(cudaFreeAsync(d_ptr.buffer_1, cudaStreamPerThread));
         postcheck;
+
+        // For now sync so the state variable is accurate. We don't do much allcoation/deallocation so this is not a big deal.
+        cudaErr(cudaStreamSynchronize(cudaStreamPerThread));
+        n_bytes_allocated = 0;
     }
 }
 
@@ -311,10 +319,21 @@ void FourierTransformer<ComputeBaseType, InputType, OtherImageType, Rank>::Alloc
     precheck;
     cudaErr(cudaMallocAsync(&d_ptr.buffer_1, compute_memory_scalar * compute_memory_wanted_ * sizeof(ComputeBaseType), cudaStreamPerThread));
     postcheck;
-
+    n_bytes_allocated = compute_memory_scalar * compute_memory_wanted_ * sizeof(ComputeBaseType);
     // cudaMallocAsync returns the pointer immediately, even though the allocation has not yet completed, so we
     // should be fine to go on and point our secondary buffer to the correct location.
     d_ptr.buffer_2 = &d_ptr.buffer_1[compute_memory_wanted_ / buffer_address_scalar];
+}
+
+template <class ComputeBaseType, class InputType, class OtherImageType, int Rank>
+void FourierTransformer<ComputeBaseType, InputType, OtherImageType, Rank>::ZeroBufferMemory( ) {
+    MyFFTDebugAssertTrue(is_set_input_params && is_set_output_params, "Input and output parameters must be set before allocating buffer memory");
+    MyFFTDebugAssertTrue(n_bytes_allocated > 0, "No  memory has been allocated");
+    // Allocate enough for the out of place buffer as well.
+
+    precheck;
+    cudaErr(cudaMemsetAsync(d_ptr.buffer_1, 0, n_bytes_allocated, cudaStreamPerThread));
+    postcheck;
 }
 
 template <class ComputeBaseType, class InputType, class OtherImageType, int Rank>
@@ -773,8 +792,10 @@ FourierTransformer<ComputeBaseType, InputType, OtherImageType, Rank>::Generic_Fw
                             break;
                         }
                     }
+
                     break;
                 }
+
                 case SizeChangeType::increase: {
                     SetPrecisionAndExectutionMethod<Generic_Fwd_FFT>(image_to_search_ptr, r2c_increase_XZ, pre_op_functor, intra_op_functor, post_op_functor);
                     transform_stage_completed = 1;
@@ -1378,8 +1399,9 @@ __launch_bounds__(FFT::max_threads_per_block) __global__
     // Since the memory ops are super straightforward this is an okay compromise.
     FFT( ).execute(thread_data, shared_mem, workspace);
 
-    io<FFT>::store(thread_data,
-                   &output_values[Return1DFFTAddress(size_of<FFT>::value)]);
+    // revert the size mem limit
+    io<FFT>::store<size_of<FFT>::value>(thread_data,
+                                        &output_values[Return1DFFTAddress(size_of<FFT>::value)]);
 }
 
 template <class FFT, class ComplexData_t>
@@ -1603,7 +1625,7 @@ __launch_bounds__(FFT::max_threads_per_block) __global__
     io<FFT>::store_c2r(thread_data, &output_values[Return1DFFTAddress(mem_offsets.physical_x_output)]);
 }
 
-template <class FFT, class InputData_t, class OutputData_t>
+template <class FFT, class InputData_t, class OutputData_t, unsigned int n_ffts>
 __launch_bounds__(FFT::max_threads_per_block) __global__
         void block_fft_kernel_C2R_NONE_XY(const InputData_t* __restrict__ input_values,
                                           OutputData_t* __restrict__ output_values,
@@ -1615,14 +1637,47 @@ __launch_bounds__(FFT::max_threads_per_block) __global__
 
     FastFFT_SMEM complex_compute_t shared_mem[];
 
-    complex_compute_t thread_data[FFT::storage_size];
+    complex_compute_t thread_data[FFT::storage_size * n_ffts];
 
-    io<FFT>::load_c2r_transposed(&input_values[ReturnZplane(gridDim.y, mem_offsets.physical_x_input)], thread_data, gridDim.y);
+    // Total concurent FFTs, n-1 in shared and then on in thread data
+    if constexpr ( n_ffts > 1 ) {
+#ifdef C2R_BUFFER_LINES
+        // we reduce the number of blocks in y by buffer_lines so to get the pitch we need to multiply by the number of blocks
+        // TODO: probably need to check we don't pick a weird odd number or something.
+        io<FFT, n_ffts>::load_c2r_transposed_coalesced(&input_values[ReturnZplane(gridDim.y, mem_offsets.physical_x_input)],
+                                                       (scalar_compute_t*)thread_data,
+                                                       gridDim.y);
+//revert
+// // // For loop zero the twiddles don't need to be computed
+// #pragma unroll(n_ffts)
+//         for ( int i_fft = 0; i_fft < n_ffts; i_fft++ ) {
+//             FFT( ).execute(&thread_data[i_fft * FFT::storage_size], shared_mem, workspace);
+//         }
+#else
+        static_assert(n_ffts == 1, "C2R_BUFFER_LINES must be enabled, should not get hereonly for n_ffts == 1");
+#endif
+    }
+    else {
 
-    // // For loop zero the twiddles don't need to be computed
-    FFT( ).execute(thread_data, shared_mem, workspace);
+        io<FFT>::load_c2r_transposed(&input_values[ReturnZplane(gridDim.y, mem_offsets.physical_x_input)],
+                                     thread_data,
+                                     gridDim.y);
+        // // For loop zero the twiddles don't need to be computed
+        FFT( ).execute(thread_data, shared_mem, workspace);
+    }
 
+#ifdef C2R_BUFFER_LINES
+    // #pragma unroll(n_ffts)
+    for ( int i_fft = 0; i_fft < n_ffts; i_fft++ ) {
+        // normally  Return1DFFTAddress(mem_offsets.physical_x_output) = pixel_pitch * (blockIdx.y + blockIdx.z * gridDim.y)
+        // we reduce the number of blocks in Y by n_ffts, hysical_x = fft_idx + blockIdx.y * n_coalesced_ffts;
+        io<FFT>::store_c2r(&thread_data[i_fft * FFT::storage_size],
+                           &output_values[mem_offsets.physical_x_output *
+                                          ((blockIdx.y * n_ffts + i_fft) + blockIdx.z * gridDim.y)]);
+    }
+#else
     io<FFT>::store_c2r(thread_data, &output_values[Return1DFFTAddress(mem_offsets.physical_x_output)]);
+#endif
 }
 
 template <class FFT, class InputData_t, class OutputData_t>
@@ -2335,6 +2390,9 @@ void FourierTransformer<ComputeBaseType, InputType, OtherImageType, Rank>::SetAn
                     int shared_memory = FFT::shared_memory_size;
 
                     CheckSharedMemory(shared_memory, device_properties);
+                    PrintLaunchParameters(LP);
+                    MyFFTPrintWithDetails("test");
+                    PrintState( );
 #if FFT_DEBUG_STAGE > 4
                     cudaErr(cudaFuncSetAttribute((void*)block_fft_kernel_C2C_NONE<FFT, data_buffer_t>, cudaFuncAttributeMaxDynamicSharedMemorySize, shared_memory));
                     if constexpr ( Rank == 1 ) {
@@ -2360,6 +2418,9 @@ void FourierTransformer<ComputeBaseType, InputType, OtherImageType, Rank>::SetAn
                         current_buffer = fastfft_internal_buffer_1;
                     }
 #endif
+                    // revert
+                    MyFFTPrintWithDetails("testpost");
+                    PrintState( );
 
                     // do something
                 }
@@ -2491,7 +2552,7 @@ void FourierTransformer<ComputeBaseType, InputType, OtherImageType, Rank>::SetAn
                     using FFT                = check_ept_t<extended_base>;
 
 #else
-                    using FFT = check_ept_t<decltype(FFT_base_arch( ) + Direction<fft_direction::inverse>( ) + Type<fft_type::c2r>( ))>;
+                    using FFT                             = check_ept_t<decltype(FFT_base_arch( ) + Direction<fft_direction::inverse>( ) + Type<fft_type::c2r>( ))>;
 #endif
 
                     LaunchParams LP = SetLaunchParameters(c2r_none, FFT::elements_per_thread);
@@ -2543,7 +2604,7 @@ void FourierTransformer<ComputeBaseType, InputType, OtherImageType, Rank>::SetAn
                     using FFT                = check_ept_t<extended_base>;
 
 #else
-                    using FFT = check_ept_t<decltype(FFT_base_arch( ) + Direction<fft_direction::inverse>( ) + Type<fft_type::c2r>( ))>;
+                    using FFT                             = check_ept_t<decltype(FFT_base_arch( ) + Direction<fft_direction::inverse>( ) + Type<fft_type::c2r>( ))>;
 #endif
 
                     LaunchParams LP         = SetLaunchParameters(c2r_none_XY, FFT::elements_per_thread);
@@ -2551,15 +2612,27 @@ void FourierTransformer<ComputeBaseType, InputType, OtherImageType, Rank>::SetAn
                     auto         workspace  = make_workspace<FFT>(error_code); // std::cout << " EPT: " << FFT::elements_per_thread << "kernel " << KernelName[kernel_type] << std::endl;        cudaErr(error_code);
 
                     int shared_memory = FFT::shared_memory_size;
-
+                    PrintLaunchParameters(LP);
+#ifdef C2R_BUFFER_LINES
+                    constexpr unsigned int n_buffer_lines = size_of<FFT>::value < 64 ? 2 : size_of<FFT>::value < 512 ? 2
+                                                                                                                     : 4;
+                    LP.gridDims.y /= n_buffer_lines;
+#else
+                    constexpr unsigned int n_buffer_lines = 1;
+#endif
+                    // revert
+                    PrintLaunchParameters(LP);
+                    std::cout << "n_buffer_lines: " << n_buffer_lines << std::endl;
                     CheckSharedMemory(shared_memory, device_properties);
+                    // ZeroBufferMemory( );
+
 #if FFT_DEBUG_STAGE > 6
-                    cudaErr(cudaFuncSetAttribute((void*)block_fft_kernel_C2R_NONE_XY<FFT, data_buffer_t, data_io_t>, cudaFuncAttributeMaxDynamicSharedMemorySize, shared_memory));
+                    cudaErr(cudaFuncSetAttribute((void*)block_fft_kernel_C2R_NONE_XY<FFT, data_buffer_t, data_io_t, n_buffer_lines>, cudaFuncAttributeMaxDynamicSharedMemorySize, shared_memory));
 
                     if constexpr ( Rank == 1 ) {
                         MyFFTDebugAssertTrue(current_buffer == fastfft_external_input, "current_buffer != fastfft_external_input");
                         precheck;
-                        block_fft_kernel_C2R_NONE_XY<FFT, data_buffer_t, data_io_t><<<LP.gridDims, LP.threadsPerBlock, shared_memory, cudaStreamPerThread>>>(
+                        block_fft_kernel_C2R_NONE_XY<FFT, data_buffer_t, data_io_t, n_buffer_lines><<<LP.gridDims, LP.threadsPerBlock, shared_memory, cudaStreamPerThread>>>(
                                 reinterpret_cast<data_buffer_t*>(d_ptr.external_input),
                                 external_output_ptr,
                                 LP.mem_offsets,
@@ -2573,7 +2646,7 @@ void FourierTransformer<ComputeBaseType, InputType, OtherImageType, Rank>::SetAn
                         if ( current_buffer == fastfft_internal_buffer_1 ) {
                             // Presumably this is intended to be the second step of an InvFFT
                             precheck;
-                            block_fft_kernel_C2R_NONE_XY<FFT, data_buffer_t, data_io_t><<<LP.gridDims, LP.threadsPerBlock, shared_memory, cudaStreamPerThread>>>(
+                            block_fft_kernel_C2R_NONE_XY<FFT, data_buffer_t, data_io_t, n_buffer_lines><<<LP.gridDims, LP.threadsPerBlock, shared_memory, cudaStreamPerThread>>>(
                                     d_ptr.buffer_1,
                                     external_output_ptr,
                                     LP.mem_offsets,
@@ -2583,7 +2656,7 @@ void FourierTransformer<ComputeBaseType, InputType, OtherImageType, Rank>::SetAn
                         else if ( current_buffer == fastfft_internal_buffer_2 ) {
                             // Presumably this is intended to be the last step in a FwdImgInv
                             precheck;
-                            block_fft_kernel_C2R_NONE_XY<FFT, data_buffer_t, data_io_t><<<LP.gridDims, LP.threadsPerBlock, shared_memory, cudaStreamPerThread>>>(
+                            block_fft_kernel_C2R_NONE_XY<FFT, data_buffer_t, data_io_t, n_buffer_lines><<<LP.gridDims, LP.threadsPerBlock, shared_memory, cudaStreamPerThread>>>(
                                     d_ptr.buffer_2,
                                     external_output_ptr,
                                     LP.mem_offsets,
@@ -2607,7 +2680,7 @@ void FourierTransformer<ComputeBaseType, InputType, OtherImageType, Rank>::SetAn
                     using FFT                = check_ept_t<extended_base>;
 
 #else
-                    using FFT = check_ept_t<decltype(FFT_base_arch( ) + Direction<fft_direction::inverse>( ) + Type<fft_type::c2r>( ))>;
+                    using FFT                             = check_ept_t<decltype(FFT_base_arch( ) + Direction<fft_direction::inverse>( ) + Type<fft_type::c2r>( ))>;
 #endif
 
                     LaunchParams LP = SetLaunchParameters(c2r_decrease_XY, FFT::elements_per_thread);
