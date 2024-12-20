@@ -1675,6 +1675,7 @@ __launch_bounds__(MAX_TPB) __global__
                            &output_values[mem_offsets.physical_x_output *
                                           ((blockIdx.y * n_ffts + i_fft) + blockIdx.z * gridDim.y)]);
     }
+
 #else
     io<FFT>::store_c2r(thread_data, &output_values[Return1DFFTAddress(mem_offsets.physical_x_output)]);
 #endif
@@ -1864,8 +1865,8 @@ void FourierTransformer<ComputeBaseType, InputType, OtherImageType, Rank>::Selec
 
     // Use recursion to step through the allowed sizes.
     GetTransformSize(kernel_type);
-
-    constexpr unsigned int Ept = SizeValue == 16 ? 4 : SizeValue < 4096 ? 8
+    // Maybe revert 16 as 4
+    constexpr unsigned int Ept = SizeValue <= 32 ? 4 : SizeValue < 4096 ? 8
                                                                         : 16;
     // Note: the size of the input/output may not match the size of the transform, i.e. transform_size.L <= transform_size.P
     if ( SizeValue == transform_size.P ) {
