@@ -903,11 +903,12 @@ struct io {
         const unsigned int warp_idx = threadIdx.x / 32;
         // Normally we would have a gridDim.y = pixel_pitch, but since here we have reduced the number of blocks to
         // pixel_pitch / n_coalesced_ffts,
-        const unsigned int tile_x     = lane_idx % (n_coalesced_ffts * read_multiplier);
-        const unsigned int physical_x = tile_x + (blockIdx.y * n_coalesced_ffts * read_multiplier);
+        const unsigned int tile_idx_x = lane_idx % (n_coalesced_ffts * read_multiplier);
+        const unsigned int physical_x = tile_idx_x + (blockIdx.y * n_coalesced_ffts * read_multiplier);
 
-        constexpr unsigned int n_active_threads_y = 16 / n_coalesced_ffts;
-        constexpr unsigned int n_sub_warp_blocks  = 32 / n_active_threads_y;
+        constexpr unsigned int n_consumer_threads = 16 / n_coalesced_ffts;
+        constexpr unsigned int n_sub_warp_blocks  = 32 / n_consumer_threads; // also pitch in elements for the tile
+        constexpr float        no_val             = scalar_compute_t{-std::numeric_limits<float>::max( )};
 
         // Loop over the data as if it were real-values N * 2*(N/2+1) (TODO: optionally save packed data from C2C so it is just N * N)
         for ( unsigned int i = 0; i < FFT::input_ept; i++ ) {
@@ -918,32 +919,46 @@ struct io {
                 // read in as floats
                 unsigned int read_from_data_index = (physical_y_in_warp + warp_idx * 32);
                 const float  read_val =
-                        read_from_data_index < SignalLength ? reinterpret_cast<const float*>(input)[read_from_data_index * pixel_pitch + physical_x] : scalar_compute_t{3.141f};
+                        read_from_data_index < SignalLength ? reinterpret_cast<const float*>(input)[read_from_data_index * pixel_pitch + physical_x] : no_val;
 
-                printf("tidx:%i, blockIDx.y:%i,read val:%2.2f,lane:%i, i:%i, warp:%i, tile_x:%i, x:%i, y:%i, readidx:%i, n_sub_warp_blocks:%i, n_coalesced_ffts:%i, FFT::input_ept:%i\n",
-                       threadIdx.x, blockIdx.y, read_val, lane_idx, i, warp_stride, tile_x, physical_x, physical_y_in_warp, read_from_data_index, n_sub_warp_blocks, n_coalesced_ffts, FFT::input_ept);
-#pragma unroll(n_coalesced_ffts)
-                for ( int i_fft = 0; i_fft < n_coalesced_ffts; i_fft++ ) {
-                    // all threads in the warp will now have data and we need to know who gets that data
-                    // this will result in some threads calculating something they don't need, but thats free
-                    unsigned int real_val_from_thread = i_fft + n_sub_warp_blocks * lane_idx;
-                    float        copied_val           = __shfl_sync(0xFFFFFFFF, read_val, real_val_from_thread, 32);
-                    // fft in the linear storage = FFT::storage_size * i_fft * 2 (2 because we are reading as floats)
-                    // + 2 * i (2 because we are reading as floats)
-                    unsigned int thread_data_linear_idx = read_multiplier * (FFT::storage_size * i_fft + i);
-                    if ( lane_idx >= warp_stride * n_active_threads_y &&
-                         lane_idx < (warp_stride + 1) * n_active_threads_y ) {
-                        thread_data[thread_data_linear_idx] = copied_val;
-                    }
+                printf("tidx:%i, blockIDx.y:%i,read val:%2.2f,lane:%i, i:%i, warp:%i, tile_idx_x:%i, x:%i, y:%i, readidx:%i, n_sub_warp_blocks:%i, n_coalesced_ffts:%i, FFT::input_ept:%i\n",
+                       threadIdx.x, blockIdx.y, read_val, lane_idx, i, warp_stride, tile_idx_x, physical_x, physical_y_in_warp, read_from_data_index, n_sub_warp_blocks, n_coalesced_ffts, FFT::input_ept);
 
-                    copied_val = __shfl_sync(0xFFFFFFFF, read_val, real_val_from_thread + n_coalesced_ffts, 32);
-                    if ( lane_idx >= warp_stride * n_active_threads_y &&
-                         lane_idx < (warp_stride + 1) * n_active_threads_y ) {
-                        thread_data[thread_data_linear_idx + 1] = copied_val;
+                // For cases where we have few threads we need another loop. Maybe better to have this specialized at compile time. I'm worried about all the branching.
+                // All threads in the warp should be participating, even if say 2 *16 x/y
+                for ( unsigned int consumer_idx = threadIdx.x & 31; consumer_idx < 32; consumer_idx += FFT::stride ) {
+                    for ( int i_fft = 0; i_fft < n_coalesced_ffts; i_fft++ ) {
+                        // all threads in the warp will now have data and we need to know who gets that data
+                        // this will result in some threads calculating something they don't need, but thats free
+                        // fft in the linear storage = FFT::storage_size * i_fft * 2 (2 because we are reading as floats)
+                        // + 2 * i (2 because we are reading as floats)
+                        unsigned int thread_data_linear_idx = read_multiplier * (FFT::storage_size * i_fft + i);
+                        // We may have read in a dummy value if we are beyond the signal length
+                        __syncwarp( );
+
+                        unsigned int producer_tidx = i_fft + n_sub_warp_blocks * lane_idx; // prodcuer index should stay the same and is defined by the tile size.
+                        float        copied_val    = __shfl_sync(0xFFFFFFFF, read_val, producer_tidx, 32);
+
+                        if ( consumer_idx >= warp_stride * n_consumer_threads &&
+                             consumer_idx < (warp_stride + 1) * n_consumer_threads &&
+                             no_val != copied_val ) {
+                            printf("readVal:%3.3f, copiedVal:%3.3f\n", read_val, copied_val);
+                            thread_data[thread_data_linear_idx] = copied_val;
+                        }
+                        __syncwarp( );
+                        copied_val = __shfl_sync(0xFFFFFFFF, read_val, producer_tidx + n_coalesced_ffts, 32);
+                        if ( consumer_idx >= warp_stride * n_consumer_threads &&
+                             consumer_idx < (warp_stride + 1) * n_consumer_threads &&
+                             no_val != copied_val ) {
+                            printf("readVal:%3.3f, copiedVal:%3.3f\n", read_val, copied_val);
+                            thread_data[thread_data_linear_idx + 1] = copied_val;
+                        }
+
+                        __syncwarp( );
                     }
+                    // increment the physical y in warp
+                    physical_y_in_warp += n_consumer_threads;
                 }
-                // increment the physical y in warp
-                physical_y_in_warp += n_active_threads_y;
             }
         }
     }
