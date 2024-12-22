@@ -133,7 +133,7 @@ void CheckUnitImpulseRealImage(Image<realType, complexType>& positive_control, i
  * @return true 
  * @return false 
  */
-template <int fft_debug_stage, int Rank, typename realType, typename complexType>
+template <int fft_debug_stage, int Rank, typename realType, typename complexType, int line_wrapping = 34>
 bool debug_partial_fft(Image<realType, complexType>& test_image,
                        short4                        fwd_dims_in,
                        short4                        fwd_dims_out,
@@ -143,59 +143,59 @@ bool debug_partial_fft(Image<realType, complexType>& test_image,
 
     bool debug_stage_is_8 = false;
     if constexpr ( fft_debug_stage == 0 ) {
-        PrintArray(test_image.real_values, fwd_dims_in.x, fwd_dims_in.y, fwd_dims_in.z, fwd_dims_in.w);
+        PrintArray(test_image.real_values, fwd_dims_in.x, fwd_dims_in.y, fwd_dims_in.z, fwd_dims_in.w, line_wrapping);
     }
     else if constexpr ( fft_debug_stage == 1 ) {
         if ( Rank == 2 )
             // Transformed X transposed XY
-            PrintArray(test_image.complex_values, fwd_dims_in.y, fwd_dims_out.w, fwd_dims_in.z);
+            PrintArray(test_image.complex_values, fwd_dims_in.y, fwd_dims_out.w, fwd_dims_in.z, line_wrapping);
         else
             // Transformed X transposed XZ
-            PrintArray(test_image.complex_values, fwd_dims_in.z, fwd_dims_in.y, fwd_dims_out.w);
+            PrintArray(test_image.complex_values, fwd_dims_in.z, fwd_dims_in.y, fwd_dims_out.w, line_wrapping);
     }
     else if constexpr ( fft_debug_stage == 2 ) {
         if ( Rank == 2 )
             // Noop, Transformed X transposed XY
-            PrintArray(test_image.complex_values, fwd_dims_in.y, fwd_dims_out.w, fwd_dims_in.z);
+            PrintArray(test_image.complex_values, fwd_dims_in.y, fwd_dims_out.w, fwd_dims_in.z, line_wrapping);
         else
             // Transformed Z, permute XYZ
-            PrintArray(test_image.complex_values, fwd_dims_in.y, fwd_dims_out.w, fwd_dims_out.z);
+            PrintArray(test_image.complex_values, fwd_dims_in.y, fwd_dims_out.w, fwd_dims_out.z, line_wrapping);
     }
     else if constexpr ( fft_debug_stage == 3 ) {
         if ( Rank == 2 )
             // Transormed Y, no reordering
-            PrintArray(test_image.complex_values, fwd_dims_out.y, fwd_dims_out.w, fwd_dims_out.z);
+            PrintArray(test_image.complex_values, fwd_dims_out.y, fwd_dims_out.w, fwd_dims_out.z, line_wrapping);
         else
             // Transormed Y, no reordering
-            PrintArray(test_image.complex_values, fwd_dims_out.y, fwd_dims_out.w, fwd_dims_out.z);
+            PrintArray(test_image.complex_values, fwd_dims_out.y, fwd_dims_out.w, fwd_dims_out.z, line_wrapping);
     }
     else if constexpr ( fft_debug_stage == 4 ) {
         // Same for 2d/3d intra-transorm op (if specified)
-        PrintArray(test_image.complex_values, fwd_dims_out.y, fwd_dims_out.w, fwd_dims_out.z);
+        PrintArray(test_image.complex_values, fwd_dims_out.y, fwd_dims_out.w, fwd_dims_out.z, line_wrapping);
     }
     else if constexpr ( fft_debug_stage == 5 ) {
         if ( Rank == 2 )
             // Inv Transformed Y, no transpose
-            PrintArray(test_image.complex_values, inv_dims_out.y, inv_dims_in.w, inv_dims_out.z);
+            PrintArray(test_image.complex_values, inv_dims_out.y, inv_dims_in.w, inv_dims_out.z, line_wrapping);
         else
             // Inv Transformed Y, swap YZ
-            PrintArray(test_image.complex_values, inv_dims_in.z, inv_dims_in.w, inv_dims_out.y);
+            PrintArray(test_image.complex_values, inv_dims_in.z, inv_dims_in.w, inv_dims_out.y, line_wrapping);
     }
     else if constexpr ( fft_debug_stage == 6 ) {
         if ( Rank == 2 )
             // Nothing different from debug 5 for 2d
-            PrintArray(test_image.complex_values, inv_dims_out.y, inv_dims_in.w, inv_dims_out.z);
+            PrintArray(test_image.complex_values, inv_dims_out.y, inv_dims_in.w, inv_dims_out.z, line_wrapping);
         else
             // Inv Transformed Z, permute XYZ
-            PrintArray(test_image.complex_values, inv_dims_in.w, inv_dims_out.y, inv_dims_out.z);
+            PrintArray(test_image.complex_values, inv_dims_in.w, inv_dims_out.y, inv_dims_out.z, line_wrapping);
     }
     else if constexpr ( fft_debug_stage == 7 ) {
         if ( Rank == 2 )
             // Inv transformed X, no transpose
-            PrintArray(test_image.real_values, inv_dims_out.x, inv_dims_out.y, inv_dims_out.z, inv_dims_out.w);
+            PrintArray(test_image.real_values, inv_dims_out.x, inv_dims_out.y, inv_dims_out.z, inv_dims_out.w, line_wrapping);
         else
             // Inv transformed X, no transpose
-            PrintArray(test_image.real_values, inv_dims_out.x, inv_dims_out.y, inv_dims_out.z, inv_dims_out.w);
+            PrintArray(test_image.real_values, inv_dims_out.x, inv_dims_out.y, inv_dims_out.z, inv_dims_out.w, line_wrapping);
     }
     else if constexpr ( fft_debug_stage == 8 ) {
         debug_stage_is_8 = true;

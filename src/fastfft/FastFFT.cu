@@ -39,7 +39,10 @@ struct check_and_set_ept {
 // FIXME: THE SAME logic should be applied if USE_FOLDED_R2C is implemented
 #ifdef USE_FOLDED_C2R
 #ifdef C2R_BUFFER_LINES
-    using check_ept = std::conditional_t<type_of<Description>::value == fft_type::c2r, cufftdx::replace_t<Description, ElementsPerThread<8>>, Description>;
+    // FIXME: for now assuming size 64 so set to 2 to get 32 threads, may not be needed (min ept must actually be 4)
+    using check_ept = std::conditional_t<type_of<Description>::value == fft_type::c2r,
+                                         std::conditional_t<size_of<Description>::value == 64, cufftdx::replace_t<Description, ElementsPerThread<4>>, Description>,
+                                         Description>;
 #else
     using check_ept = std::conditional_t<type_of<Description>::value == fft_type::c2r, cufftdx::replace_t<Description, ElementsPerThread<Description::elements_per_thread * c2r_multiplier>>, Description>;
 #endif // buffer lines
@@ -1641,7 +1644,7 @@ __launch_bounds__(MAX_TPB) __global__
     complex_compute_t thread_data[FFT::storage_size * n_ffts];
 
     // Total concurent FFTs, n-1 in shared and then on in thread data
-    if constexpr ( n_ffts > 1 ) {
+    if constexpr ( n_ffts > 1 && sizeof(scalar_compute_t) == 4 && size_of<FFT>::value > 32 ) {
 #ifdef C2R_BUFFER_LINES
         // we reduce the number of blocks in y by buffer_lines so to get the pitch we need to multiply by the number of blocks
         // TODO: probably need to check we don't pick a weird odd number or something.
@@ -2619,8 +2622,10 @@ void FourierTransformer<ComputeBaseType, InputType, OtherImageType, Rank>::SetAn
 #ifdef C2R_BUFFER_LINES
                     // neads to be chosen so that 16 / n_buffer_lines >= FFT::stride (blockDim.x)
                     constexpr unsigned int min_buffer_lines = std::max(16u / FFT::stride, 2u);
-                    constexpr unsigned int n_buffer_lines   = size_of<FFT>::value < 64u ? std::max(min_buffer_lines, 2u) : size_of<FFT>::value < 512 ? std::max(min_buffer_lines, 4u)
-                                                                                                                                                     : std::max(min_buffer_lines, 4u);
+                    constexpr unsigned int n_buffer_lines   = size_of<FFT>::value < 64u ? 1 : size_of<FFT>::value < 128u ? std::max(min_buffer_lines, 2u)
+                                                                                      : size_of<FFT>::value < 512        ? std::max(min_buffer_lines, 4u)
+                                                                                                                         : std::max(min_buffer_lines, 4u);
+
                     LP.gridDims.y /= n_buffer_lines;
                     // FIXME assuming we get a multiple of 32
                     constexpr unsigned int max_threads_per_block = FFT::max_threads_per_block < 32 ? 32 / FFT::max_threads_per_block * FFT::max_threads_per_block : FFT::max_threads_per_block;

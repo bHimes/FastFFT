@@ -60,18 +60,20 @@ void compare_libraries(std::vector<int> size, FastFFT::SizeChangeType::Enum size
             }
 
             // bool test_passed = true;
+            using complex_compute_t = float2;
+            using scalar_compute_t  = float;
 
-            Image<float, float2> FT_input(input_size);
-            Image<float, float2> FT_output(output_size);
+            Image<scalar_compute_t, complex_compute_t> FT_input(input_size);
+            Image<scalar_compute_t, complex_compute_t> FT_output(output_size);
 
             // We just make one instance of the FourierTransformer class, with calc type float.
             // For the time being input and output are also float. TODO caFlc optionally either fp16 or nv_bloat16, TODO inputs at lower precision for bandwidth improvement.
-            FastFFT::FourierTransformer<float, float, float2, Rank> FT;
+            FastFFT::FourierTransformer<scalar_compute_t, scalar_compute_t, complex_compute_t, Rank> FT;
             // Create an instance to copy memory also for the cufft tests.
-            FastFFT::FourierTransformer<float, float, float2, Rank> targetFT;
+            FastFFT::FourierTransformer<scalar_compute_t, scalar_compute_t, complex_compute_t, Rank> targetFT;
 
-            float* FT_buffer;
-            float* targetFT_buffer;
+            scalar_compute_t* FT_buffer;
+            scalar_compute_t* targetFT_buffer;
 
             if ( is_size_change_decrease ) {
                 FT.SetForwardFFTPlan(input_size.x, input_size.y, input_size.z, input_size.x, input_size.y, input_size.z);
@@ -148,12 +150,12 @@ void compare_libraries(std::vector<int> size, FastFFT::SizeChangeType::Enum size
                 // Because the output is smaller than the input, we just copy to FT input.
                 // TODO: In reality, we didn't need to allocate FT_output at all in this case
                 FT.CopyDeviceToHostAndSynchronize(FT_input.real_values);
-                continue_debugging = debug_partial_fft<FFT_DEBUG_STAGE, Rank>(FT_input, fwd_dims_in, fwd_dims_out, inv_dims_in, inv_dims_out, __LINE__);
+                continue_debugging = debug_partial_fft<FFT_DEBUG_STAGE, Rank, scalar_compute_t, complex_compute_t, 64>(FT_input, fwd_dims_in, fwd_dims_out, inv_dims_in, inv_dims_out, __LINE__);
             }
             else {
                 // the output is equal or > the input, so we can always copy there.
                 FT.CopyDeviceToHostAndSynchronize(FT_output.real_values);
-                continue_debugging = debug_partial_fft<FFT_DEBUG_STAGE, Rank>(FT_output, fwd_dims_in, fwd_dims_out, inv_dims_in, inv_dims_out, __LINE__);
+                continue_debugging = debug_partial_fft<FFT_DEBUG_STAGE, Rank, scalar_compute_t, complex_compute_t, 64>(FT_output, fwd_dims_in, fwd_dims_out, inv_dims_in, inv_dims_out, __LINE__);
             }
 
             MyTestPrintAndExit(continue_debugging, "Partial FFT debug stage " + std::to_string(FFT_DEBUG_STAGE));
@@ -187,7 +189,7 @@ int main(int argc, char** argv) {
         std::cout << "This doesn't make sense as the synchronizations are invalidating.\n";
 // exit(1);
 #endif
-        std::vector<int> size = {16, 32};
+        std::vector<int> size = {32, 64};
 
         SCT size_change_type;
         // Set the SCT to no_change, increase, or decrease
