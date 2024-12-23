@@ -1402,7 +1402,6 @@ __launch_bounds__(FFT::max_threads_per_block) __global__
     // Since the memory ops are super straightforward this is an okay compromise.
     FFT( ).execute(thread_data, shared_mem, workspace);
 
-    // revert the size mem limit
     io<FFT>::store<size_of<FFT>::value>(thread_data,
                                         &output_values[Return1DFFTAddress(size_of<FFT>::value)]);
 }
@@ -1648,15 +1647,15 @@ __launch_bounds__(MAX_TPB) __global__
 #ifdef C2R_BUFFER_LINES
         // we reduce the number of blocks in y by buffer_lines so to get the pitch we need to multiply by the number of blocks
         // TODO: probably need to check we don't pick a weird odd number or something.
-        io<FFT, MAX_TPB, n_ffts>::load_c2r_transposed_coalesced(&input_values[ReturnZplane(gridDim.y, mem_offsets.physical_x_input)],
+        io<FFT, MAX_TPB, n_ffts>::load_c2r_transposed_coalesced(&input_values[ReturnZplane(gridDim.y * n_ffts * 2, mem_offsets.physical_x_input)],
                                                                 (scalar_compute_t*)thread_data,
                                                                 gridDim.y * n_ffts * 2);
-//revert
-// // // For loop zero the twiddles don't need to be computed
-// #pragma unroll(n_ffts)
-//         for ( int i_fft = 0; i_fft < n_ffts; i_fft++ ) {
-//             FFT( ).execute(&thread_data[i_fft * FFT::storage_size], shared_mem, workspace);
-//         }
+
+// // For loop zero the twiddles don't need to be computed
+#pragma unroll(n_ffts)
+        for ( int i_fft = 0; i_fft < n_ffts; i_fft++ ) {
+            FFT( ).execute(&thread_data[i_fft * FFT::storage_size], shared_mem, workspace);
+        }
 #else
         static_assert(n_ffts == 1, "C2R_BUFFER_LINES must be enabled, should not get hereonly for n_ffts == 1");
 #endif
@@ -1675,10 +1674,8 @@ __launch_bounds__(MAX_TPB) __global__
     for ( int i_fft = 0; i_fft < n_ffts; i_fft++ ) {
         // normally  Return1DFFTAddress(mem_offsets.physical_x_output) = pixel_pitch * (blockIdx.y + blockIdx.z * gridDim.y)
         // we reduce the number of blocks in Y by n_ffts, hysical_x = fft_idx + blockIdx.y * n_coalesced_ffts;
-        if ( threadIdx.y == 0 ) {
-            io<FFT>::store_c2r(&thread_data[i_fft * FFT::storage_size],
-                               &output_values[mem_offsets.physical_x_output * (blockIdx.y * n_ffts + i_fft)]); // FIXME only 2d
-        }
+        io<FFT>::store_c2r(&thread_data[i_fft * FFT::storage_size],
+                           &output_values[mem_offsets.physical_x_output * (blockIdx.y * n_ffts + i_fft)]); // FIXME only 2d
     }
 
 #else
@@ -2424,8 +2421,6 @@ void FourierTransformer<ComputeBaseType, InputType, OtherImageType, Rank>::SetAn
                         current_buffer = fastfft_internal_buffer_1;
                     }
 #endif
-                    // revert
-                    MyFFTPrintWithDetails("testpost");
                     PrintState( );
 
                     // do something
@@ -2629,11 +2624,7 @@ void FourierTransformer<ComputeBaseType, InputType, OtherImageType, Rank>::SetAn
                     LP.gridDims.y /= n_buffer_lines;
                     // FIXME assuming we get a multiple of 32
                     constexpr unsigned int max_threads_per_block = FFT::max_threads_per_block; // revert
-                    // constexpr unsigned int max_threads_per_block = FFT::max_threads_per_block < 32 ? 32 / FFT::max_threads_per_block * FFT::max_threads_per_block : FFT::max_threads_per_block;
-                    // if ( max_threads_per_block > FFT::max_threads_per_block ) {
-                    //     LP.threadsPerBlock.y = 32 / FFT::max_threads_per_block;
-                    //     // TODO: other asserts, but basically, for the buffering we want to have at least 32 threads per block, and we can't modify x
-                    // }
+
                     std::cerr << "min_buffer_lines " << min_buffer_lines << " n_buffer " << n_buffer_lines << std::endl;
 
 #else
