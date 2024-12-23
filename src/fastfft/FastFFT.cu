@@ -41,10 +41,12 @@ struct check_and_set_ept {
 #ifdef C2R_BUFFER_LINES
     // FIXME: for now assuming size 64 so set to 2 to get 32 threads, may not be needed (min ept must actually be 4)
     using check_ept = std::conditional_t<type_of<Description>::value == fft_type::c2r,
-                                         std::conditional_t<size_of<Description>::value == 32, cufftdx::replace_t<Description, ElementsPerThread<4>>, Description>,
+                                         cufftdx::replace_t<Description, ElementsPerThread<std::min(8u, Description::elements_per_thread * 2u)>>,
                                          Description>;
 #else
-    using check_ept = std::conditional_t<type_of<Description>::value == fft_type::c2r, cufftdx::replace_t<Description, ElementsPerThread<Description::elements_per_thread * c2r_multiplier>>, Description>;
+    using check_ept = std::conditional_t<type_of<Description>::value == fft_type::c2r,
+                                         cufftdx::replace_t<Description, ElementsPerThread<std::min(32u, Description::elements_per_thread* c2r_multiplier)>>,
+                                         Description>;
 #endif // buffer lines
 #else
     using check_ept = Description;
@@ -2393,9 +2395,6 @@ void FourierTransformer<ComputeBaseType, InputType, OtherImageType, Rank>::SetAn
                     int shared_memory = FFT::shared_memory_size;
 
                     CheckSharedMemory(shared_memory, device_properties);
-                    PrintLaunchParameters(LP);
-                    MyFFTPrintWithDetails("test");
-                    PrintState( );
 #if FFT_DEBUG_STAGE > 4
                     cudaErr(cudaFuncSetAttribute((void*)block_fft_kernel_C2C_NONE<FFT, data_buffer_t>, cudaFuncAttributeMaxDynamicSharedMemorySize, shared_memory));
                     if constexpr ( Rank == 1 ) {
@@ -2421,7 +2420,6 @@ void FourierTransformer<ComputeBaseType, InputType, OtherImageType, Rank>::SetAn
                         current_buffer = fastfft_internal_buffer_1;
                     }
 #endif
-                    PrintState( );
 
                     // do something
                 }
@@ -2613,31 +2611,23 @@ void FourierTransformer<ComputeBaseType, InputType, OtherImageType, Rank>::SetAn
                     auto         workspace  = make_workspace<FFT>(error_code); // std::cout << " EPT: " << FFT::elements_per_thread << "kernel " << KernelName[kernel_type] << std::endl;        cudaErr(error_code);
 
                     int shared_memory = FFT::shared_memory_size;
-                    PrintLaunchParameters(LP);
 #ifdef C2R_BUFFER_LINES
                     // neads to be chosen so that 16 / n_buffer_lines >= FFT::stride (blockDim.x)
                     constexpr unsigned int min_buffer_lines = std::max(16u / FFT::stride, 2u);
                     constexpr unsigned int n_buffer_lines   = size_of<FFT>::value < 32u ? 1 : size_of<FFT>::value < 128u ? std::max(min_buffer_lines, 2u)
                                                                                       : size_of<FFT>::value < 512        ? std::max(min_buffer_lines, 4u)
-                                                                                                                         : std::max(min_buffer_lines, 4u);
+                                                                                                                         : 4; //std::max(min_buffer_lines, 4u);
 
                     LP.gridDims.y /= n_buffer_lines;
                     // FIXME assuming we get a multiple of 32
                     constexpr unsigned int max_threads_per_block = FFT::max_threads_per_block; // revert
-
-                    std::cerr << "min_buffer_lines " << min_buffer_lines << " n_buffer " << n_buffer_lines << std::endl;
 
 #else
 
                     constexpr unsigned int n_buffer_lines        = 1;
                     constexpr unsigned int max_threads_per_block = FFT::max_threads_per_block;
 #endif
-                    // revert
-                    PrintLaunchParameters(LP);
-                    std::cout << "n_buffer_lines: " << n_buffer_lines << std::endl;
                     CheckSharedMemory(shared_memory, device_properties);
-
-                    // ZeroBufferMemory( );
 
 #if FFT_DEBUG_STAGE > 6
                     cudaErr(cudaFuncSetAttribute((void*)block_fft_kernel_C2R_NONE_XY<FFT, max_threads_per_block, data_buffer_t, data_io_t, n_buffer_lines>, cudaFuncAttributeMaxDynamicSharedMemorySize, shared_memory));

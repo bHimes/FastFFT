@@ -470,8 +470,6 @@ struct WarpTiler {
     // The imaginary part will just be + 1
     __device__ __forceinline__ unsigned int get_producer_thread_re_lane_idx(const unsigned int i_read) {
         int producer_thread_tile_index_y = get_producer_thread_tile_index_y(i_read);
-        if ( blockIdx.y == 1 )
-            printf("tidx: %i i_read: %i ws:%i ntpc:%i pttiy:%i tileID %i x: %i y:%i l: %i\n", threadIdx.x, i_read, warp_size, n_tile_reads_per_cycle, producer_thread_tile_index_y, tile_idx, logical_idx_in_tile_fast, logical_idx_in_tile_strided, lane_idx);
         if ( producer_thread_tile_index_y < 0 || producer_thread_tile_index_y >= tile_thread_dim_strided ) {
             return warp_size;
         }
@@ -1043,30 +1041,17 @@ struct io {
                 const bool is_active_consumer          = producer_thread_re_lane_idx < warp_tiler.warp_size;
 
                 unsigned int thread_index = warp_tiler.thread_data_idx_real_part_fft_0(i);
-                if ( blockIdx.y == 1 )
-                    printf("active: %i producer %i tid:%i\n", is_active_consumer, producer_thread_re_lane_idx, thread_index);
+
 #pragma unroll(n_coalesced_ffts)
                 for ( int i_fft = 0; i_fft < n_coalesced_ffts; i_fft++ ) {
                     float copied_val = __shfl_sync(0xFFFFFFFF, read_val, producer_thread_re_lane_idx, 32);
                     if ( is_active_consumer && warp_tiler.invalid_read_v != copied_val ) {
-                        if ( blockIdx.y == 1 )
-                            printf("tidx: %i tidy: %i blockIDx.y: %i read val: %2.2f lane: %i i: %i warp: %i tile_idx_x: %i x: %i y: %i readidx: %i n_sub_warp_blocks: %i FFT::input_ept: %i\n",
-                                   threadIdx.x, threadIdx.y, blockIdx.y, read_val, warp_tiler.lane_idx, i, i_tile, warp_tiler.tile_idx, warp_tiler.logical_idx_in_tile_fast, warp_tiler.logical_idx_in_tile_strided,
-                                   data_index_to_read_1d_value, n_coalesced_ffts, FFT::input_ept);
-                        if ( blockIdx.y == 1 )
-                            printf("x: %i, y:%i  from: %i, i_fft:%i, readVal:%3.3f, copiedVal:%3.3f\n", warp_tiler.logical_idx_in_tile_fast, warp_tiler.logical_idx_in_tile_strided, producer_thread_re_lane_idx, i_fft, read_val, copied_val);
                         thread_data[thread_index] = copied_val;
                     }
                     producer_thread_re_lane_idx++;
 
                     copied_val = __shfl_sync(0xFFFFFFFF, read_val, producer_thread_re_lane_idx, 32);
                     if ( is_active_consumer && warp_tiler.invalid_read_v != copied_val ) {
-                        if ( blockIdx.y == 1 )
-                            printf("tidx: %i tidy: %i blockIDx.y: %i read val: %2.2f lane: %i i: %i warp: %i tile_idx_x: %i x: %i y: %i readidx: %i n_sub_warp_blocks: %i FFT::input_ept: %i\n",
-                                   threadIdx.x, threadIdx.y, blockIdx.y, read_val, warp_tiler.lane_idx, i, i_tile, warp_tiler.tile_idx, warp_tiler.logical_idx_in_tile_fast, warp_tiler.logical_idx_in_tile_strided,
-                                   data_index_to_read_1d_value, n_coalesced_ffts, FFT::input_ept);
-                        if ( blockIdx.y == 1 )
-                            printf("x: %i, y:%i  from: %i, i_fft:%i, readVal:%3.3f, copiedVal:%3.3f\n", warp_tiler.logical_idx_in_tile_fast, warp_tiler.logical_idx_in_tile_strided, producer_thread_re_lane_idx, i_fft, read_val, copied_val);
                         thread_data[thread_index + 1] = copied_val;
                     }
                     producer_thread_re_lane_idx++;
