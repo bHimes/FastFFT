@@ -352,6 +352,9 @@ inline __device__ SetTo_t convert_if_needed(const GetFrom_t* __restrict__ ptr, c
 template <bool flag = false>
 inline void static_assert_allowed_read_size( ) { static_assert(flag, "static_assert_allowed_read_size"); }
 
+// Allows for testing on smaller arrays for easier readouts.
+#define DEBUG_WARP_TILER
+
 template <class FFT, unsigned int max_threads_per_block = FFT::max_threads_per_block, unsigned int n_coalesced_ffts = 1>
 struct WarpTiler {
     using complex_compute_t = typename FFT::value_type;
@@ -389,7 +392,6 @@ struct WarpTiler {
     static constexpr unsigned int read_bytes = 4;
     static_assert(sizeof(complex_compute_t) == 2 * read_bytes, "warp_tiler requires complex_compute_t to be 8 bytes atm.");
     static_assert(sizeof(scalar_compute_t) == read_bytes, "warp_tiler requires scalar_compute_t to be 4 bytes atm.");
-    static constexpr unsigned int read_multiplier = 2;
 
     static constexpr unsigned int expected_reads_per_cycle = FFT::stride;
     static constexpr unsigned int warp_size                = 32; // I think this is true for all arch as of 2024 FIXME: confirm
@@ -399,16 +401,14 @@ struct WarpTiler {
 
     static_assert(n_4byte_reads_per_complex_element != 0, "static_assert_allowed_read_size");
 
-    static constexpr bool         strided_XY              = true; // for later configuration;
-    static constexpr unsigned int tile_thread_dim_fast    = n_coalesced_ffts * n_4byte_reads_per_complex_element;
+    static constexpr bool         strided_XY           = true; // for later configuration;
+    static constexpr unsigned int tile_thread_dim_fast = n_coalesced_ffts * n_4byte_reads_per_complex_element;
+#ifdef DEBUG_WARP_TILER
+    static constexpr unsigned int tile_thread_dim_strided = std::min(expected_reads_per_cycle, warp_size) / tile_thread_dim_fast;
+#else
     static constexpr unsigned int tile_thread_dim_strided = warp_size / tile_thread_dim_fast;
-
-    static_assert(tile_thread_dim_strided <= expected_reads_per_cycle, "there are not enough x threads for this method.");
-    // static_assert(expected_reads_per_cycle >= warp_size, "Min blockDim.x 32 for this optimization");
-
-    // some aliases but I guess we could just omit the above two lines.
-    static constexpr unsigned int tile_thread_dim_x = strided_XY ? tile_thread_dim_fast : tile_thread_dim_strided;
-    static constexpr unsigned int tile_thread_dim_y = strided_XY ? tile_thread_dim_strided : tile_thread_dim_fast;
+    static_assert(expected_reads_per_cycle >= warp_size, "Min blockDim.x 32 for this optimization");
+#endif
 
     static constexpr unsigned int n_tile_reads_per_cycle = expected_reads_per_cycle / tile_thread_dim_strided;
 
@@ -426,63 +426,51 @@ struct WarpTiler {
     const unsigned int tile_idx = threadIdx.x / warp_size;
 
     // TOOD: rename and make invertable
-    const unsigned int physical_y_in_tile = lane_idx / tile_thread_dim_x;
-    const unsigned int physical_x_in_tile = lane_idx & (warp_size - 1);
+    const unsigned int logical_idx_in_tile_strided = lane_idx / tile_thread_dim_fast;
+    const unsigned int logical_idx_in_tile_fast    = lane_idx % tile_thread_dim_fast;
 
     // in the normal approach this will be threadIdx.x + i*FFT::stride (which we'll need to define the consumer thread)
     // I think this will be at most 2 instuctions IMAD, but maybe it is better to calc an intial value and increment it
     __device__ __forceinline__ unsigned int data_index_to_read_1d(const unsigned int i, const unsigned int i_read) {
-        return (physical_y_in_tile + tile_idx * warp_size) + i_read * n_tile_reads_per_cycle + i * FFT::stride;
-    }
-
-    // FIXME: there should be an assert in the main program prior to launching this kernel that things are square
-    // leaving it templated here so it is more obvious if those restrictions are relaxed in the future.
-    template <unsigned int PixelPitch = 0>
-    __device__ __forceinline__ unsigned int data_index_to_read_2d(const unsigned int data_index_to_read_1d_value) {
-        if constexpr ( PixelPitch == 0 ) {
-            // Generally we have a square FFT, so we can infer the pixel pitch at compile time
-            return (size_of<FFT>::value * read_multiplier) * data_index_to_read_1d_value + physical_x_in_tile;
-        }
-        else {
-            return PixelPitch * data_index_to_read_1d_value + physical_x_in_tile;
-        }
+        return (logical_idx_in_tile_strided + tile_idx * warp_size) + i_read * tile_thread_dim_strided + i * FFT::stride;
     }
 
     __device__ __forceinline__ unsigned int thread_data_linear_idx_real_part(const unsigned int i) {
-        // The consumer's i_fft (index of coalesced FFT) is just physical_x_in_tile (FIXME, may be C2R XY specific here)
-        return (read_multiplier * FFT::storage_size * physical_x_in_tile / 2) + read_multiplier * i;
+        // The consumer's i_fft (index of coalesced FFT) is just logical_idx_in_tile_fast (FIXME, may be C2R XY specific here)
+        return (n_4byte_reads_per_complex_element * FFT::storage_size * logical_idx_in_tile_fast / 2) + n_4byte_reads_per_complex_element * i;
     }
 
     static __device__ __forceinline__ unsigned int thread_data_idx_real_part_fft_0(const unsigned int i) {
-        return read_multiplier * i;
+        return n_4byte_reads_per_complex_element * i;
     }
 
-    static constexpr unsigned int thread_data_fft_stride = read_multiplier * FFT::storage_size;
+    static constexpr unsigned int thread_data_fft_stride = n_4byte_reads_per_complex_element * FFT::storage_size;
 
     // This can't be right, which means data_index_to_read_1d must be wrong
     __device__ __forceinline__ int get_producer_thread_tile_index_y(const unsigned int i_read) {
         // A consumer thread will be wanting the data from input_data[threadIdx.x + i*FFT::stride]
-        // The producer thread that fetched this index was (physical_y_in_tile + tile_idx * warp_size) +  i_read * n_tile_reads_per_cycle + i * FFT::stride;
-        // Solving for physical_y_in_tile = threadIdx.x - tile_idx * warp_size - i_read * n_tile_reads_per_cycle
+        // The producer thread that fetched this index was (logical_idx_in_tile_strided + tile_idx * warp_size) +  i_read * n_tile_reads_per_cycle + i * FFT::stride;
+        // Solving for logical_idx_in_tile_strided = threadIdx.x - tile_idx * warp_size - i_read * n_tile_reads_per_cycle
 
         // This will only be a valid index for a return value >= 0 < n_tile_reads_per_cycle which determines if we are an active consumer thread
-        return threadIdx.x - tile_idx * warp_size - i_read * n_tile_reads_per_cycle;
+        return threadIdx.x - tile_idx * warp_size - i_read * tile_thread_dim_strided;
     }
 
     __device__ __forceinline__ unsigned int get_my_fft_idx( ) {
-        return physical_x_in_tile / 2;
+        return logical_idx_in_tile_fast / 2;
     }
 
-    // the real part will be at the even (physical_x_in_tile, thread_tile_index_y)
+    // the real part will be at the even (logical_idx_in_tile_fast, thread_tile_index_y)
     // The imaginary part will just be + 1
     __device__ __forceinline__ unsigned int get_producer_thread_re_lane_idx(const unsigned int i_read) {
         int producer_thread_tile_index_y = get_producer_thread_tile_index_y(i_read);
-        if ( producer_thread_tile_index_y < 0 || n_tile_reads_per_cycle >= n_tile_reads_per_cycle ) {
+        printf("tidx: %i i_read: %i ws:%i ntpc:%i pttiy:%i tileID %i x: %i y:%i l: %i\n", threadIdx.x, i_read, warp_size, n_tile_reads_per_cycle, producer_thread_tile_index_y, tile_idx, logical_idx_in_tile_fast, logical_idx_in_tile_strided, lane_idx);
+        if ( producer_thread_tile_index_y < 0 || producer_thread_tile_index_y >= tile_thread_dim_strided ) {
             return warp_size;
         }
         else {
             // just a conversion from a 2d index in the tile to a 1d index == producers lane
-            return read_multiplier * get_my_fft_idx( ) + producer_thread_tile_index_y * tile_thread_dim_x;
+            return n_4byte_reads_per_complex_element * get_my_fft_idx( ) + producer_thread_tile_index_y * tile_thread_dim_fast;
         }
     }
 
@@ -1038,13 +1026,12 @@ struct io {
         WarpTiler<FFT, max_threads_per_block, n_coalesced_ffts> warp_tiler(get_lane_id( ));
         //revert FFT::input_ept
         for ( unsigned int i = 0; i < FFT::input_ept; i++ ) {
-
             for ( unsigned int i_tile = 0; i_tile < warp_tiler.n_tile_reads_per_cycle; i_tile++ ) {
                 // 4 / 2 = 2, min(2, 16) = 2
                 // read in as floats
                 const unsigned int data_index_to_read_1d_value = warp_tiler.data_index_to_read_1d(i, i_tile);
                 const float        read_val =
-                        data_index_to_read_1d_value < SignalLength ? reinterpret_cast<const float*>(input)[warp_tiler.data_index_to_read_2d(data_index_to_read_1d_value)] : warp_tiler.invalid_read_v;
+                        data_index_to_read_1d_value < SignalLength ? reinterpret_cast<const float*>(input)[data_index_to_read_1d_value * pixel_pitch + warp_tiler.logical_idx_in_tile_fast] : warp_tiler.invalid_read_v;
 
                 // if ( no_val != read_val )
                 //     printf("tidx: %i tidy: %i blockIDx.y: %i read val: %2.2f lane: %i i: %i warp: %i tile_idx_x: %i x: %i y: %i readidx: %i n_sub_warp_blocks: %i n_coalesced_ffts: %i FFT::input_ept: %i\n",
@@ -1060,18 +1047,18 @@ struct io {
                     float copied_val = __shfl_sync(0xFFFFFFFF, read_val, producer_thread_re_lane_idx, 32);
                     if ( is_active_consumer && warp_tiler.invalid_read_v != copied_val ) {
                         printf("tidx: %i tidy: %i blockIDx.y: %i read val: %2.2f lane: %i i: %i warp: %i tile_idx_x: %i x: %i y: %i readidx: %i n_sub_warp_blocks: %i FFT::input_ept: %i\n",
-                               threadIdx.x, threadIdx.y, blockIdx.y, read_val, warp_tiler.lane_idx, i, i_tile, warp_tiler.tile_idx, warp_tiler.physical_x_in_tile, warp_tiler.physical_y_in_tile,
+                               threadIdx.x, threadIdx.y, blockIdx.y, read_val, warp_tiler.lane_idx, i, i_tile, warp_tiler.tile_idx, warp_tiler.logical_idx_in_tile_fast, warp_tiler.logical_idx_in_tile_strided,
                                data_index_to_read_1d_value, n_coalesced_ffts, FFT::input_ept);
-                        printf("x: %i, y:%i l:%i active:%i, from: %i, readVal:%3.3f, copiedVal:%3.3f\n", warp_tiler.physical_x_in_tile, warp_tiler.physical_y_in_tile, is_active_consumer, producer_thread_re_lane_idx, read_val, copied_val);
+                        printf("x: %i, y:%i l:%i active:%i, from: %i, readVal:%3.3f, copiedVal:%3.3f\n", warp_tiler.logical_idx_in_tile_fast, warp_tiler.logical_idx_in_tile_strided, is_active_consumer, producer_thread_re_lane_idx, read_val, copied_val);
                         thread_data[thread_index] = copied_val;
                     }
 
                     copied_val = __shfl_sync(0xFFFFFFFF, read_val, producer_thread_re_lane_idx + 1, 32);
                     if ( is_active_consumer && warp_tiler.invalid_read_v != copied_val ) {
                         printf("tidx: %i tidy: %i blockIDx.y: %i read val: %2.2f lane: %i i: %i warp: %i tile_idx_x: %i x: %i y: %i readidx: %i n_sub_warp_blocks: %i FFT::input_ept: %i\n",
-                               threadIdx.x, threadIdx.y, blockIdx.y, read_val, warp_tiler.lane_idx, i, i_tile, warp_tiler.tile_idx, warp_tiler.physical_x_in_tile, warp_tiler.physical_y_in_tile,
+                               threadIdx.x, threadIdx.y, blockIdx.y, read_val, warp_tiler.lane_idx, i, i_tile, warp_tiler.tile_idx, warp_tiler.logical_idx_in_tile_fast, warp_tiler.logical_idx_in_tile_strided,
                                data_index_to_read_1d_value, n_coalesced_ffts, FFT::input_ept);
-                        printf("x: %i, y:%i l:%i active:%i, from: %i, readVal:%3.3f, copiedVal:%3.3f\n", warp_tiler.physical_x_in_tile, warp_tiler.physical_y_in_tile, is_active_consumer, producer_thread_re_lane_idx, read_val, copied_val);
+                        printf("x: %i, y:%i l:%i active:%i, from: %i, readVal:%3.3f, copiedVal:%3.3f\n", warp_tiler.logical_idx_in_tile_fast, warp_tiler.logical_idx_in_tile_strided, is_active_consumer, producer_thread_re_lane_idx, read_val, copied_val);
                         thread_data[thread_index + 1] = copied_val;
                     }
 
