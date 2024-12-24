@@ -9,6 +9,8 @@ typedef struct __align__(32) _DeviceProps {
     int max_shared_memory_per_SM;
     int max_registers_per_block;
     int max_persisting_L2_cache_size;
+    int L2_cache_size;
+    int accessPolicyMaxWindowSize;
 }
 
 DeviceProps;

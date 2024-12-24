@@ -150,12 +150,12 @@ void compare_libraries(std::vector<int> size, FastFFT::SizeChangeType::Enum size
                 // Because the output is smaller than the input, we just copy to FT input.
                 // TODO: In reality, we didn't need to allocate FT_output at all in this case
                 FT.CopyDeviceToHostAndSynchronize(FT_input.real_values);
-                continue_debugging = debug_partial_fft<FFT_DEBUG_STAGE, Rank, scalar_compute_t, complex_compute_t, 34>(FT_input, fwd_dims_in, fwd_dims_out, inv_dims_in, inv_dims_out, __LINE__);
+                continue_debugging = debug_partial_fft<FFT_DEBUG_STAGE, Rank, scalar_compute_t, complex_compute_t, 130>(FT_input, fwd_dims_in, fwd_dims_out, inv_dims_in, inv_dims_out, __LINE__);
             }
             else {
                 // the output is equal or > the input, so we can always copy there.
                 FT.CopyDeviceToHostAndSynchronize(FT_output.real_values);
-                continue_debugging = debug_partial_fft<FFT_DEBUG_STAGE, Rank, scalar_compute_t, complex_compute_t, 34>(FT_output, fwd_dims_in, fwd_dims_out, inv_dims_in, inv_dims_out, __LINE__);
+                continue_debugging = debug_partial_fft<FFT_DEBUG_STAGE, Rank, scalar_compute_t, complex_compute_t, 130>(FT_output, fwd_dims_in, fwd_dims_out, inv_dims_in, inv_dims_out, __LINE__);
             }
 
             MyTestPrintAndExit(continue_debugging, "Partial FFT debug stage " + std::to_string(FFT_DEBUG_STAGE));
@@ -189,7 +189,7 @@ int main(int argc, char** argv) {
         std::cout << "This doesn't make sense as the synchronizations are invalidating.\n";
 // exit(1);
 #endif
-        std::vector<int> size = {16, 32};
+        std::vector<int> size = {64, 128};
 
         SCT size_change_type;
         // Set the SCT to no_change, increase, or decrease

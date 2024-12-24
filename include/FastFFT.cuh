@@ -1,12 +1,15 @@
 // Utilites for FastFFT.cu that we don't need the host to know about (FastFFT.h)
 #include "FastFFT.h"
 
+#ifndef __INCLUDE_FAST_FFT_CUH__
+#define __INCLUDE_FAST_FFT_CUH__
+
 // #define USE_FOLDED_R2C_C2R
 #define USE_FOLDED_C2R
 #define C2R_BUFFER_LINES
+#define C2R_BUFFER_LINES_SHARED
 
-#ifndef __INCLUDE_FAST_FFT_CUH__
-#define __INCLUDE_FAST_FFT_CUH__
+// cudaErr(cudaFuncSetSharedMemConfig((const void*)block_fft_kernel_C2R_DECREASE_XY<FFT, data_buffer_t, data_io_t>, cudaSharedMemBankSizeEightByte));
 
 #include "detail/detail.cuh"
 #include <cuda_fp16.h>
@@ -432,10 +435,17 @@ struct WarpTiler {
     // in the normal approach this will be threadIdx.x + i*FFT::stride (which we'll need to define the consumer thread)
     // I think this will be at most 2 instuctions IMAD, but maybe it is better to calc an intial value and increment it
     __device__ __forceinline__ unsigned int data_index_to_read_1d(const unsigned int i, const unsigned int i_read) {
-        if constexpr ( FFT::stride > 32 )
+        if constexpr ( FFT::stride >= 32 )
             return (logical_idx_in_tile_strided + tile_idx * warp_size) + i_read * tile_thread_dim_strided + i * FFT::stride;
         else
             return logical_idx_in_tile_strided + i_read * tile_thread_dim_strided + i * FFT::stride;
+    }
+
+    __device__ __forceinline__ unsigned int data_index_to_read_1d_shared( ) {
+        if constexpr ( FFT::stride >= 32 )
+            return logical_idx_in_tile_strided + threadIdx.y * tile_thread_dim_strided + tile_idx * warp_size * blockDim.y;
+        else
+            return logical_idx_in_tile_strided + threadIdx.y * tile_thread_dim_strided;
     }
 
     __device__ __forceinline__ unsigned int thread_data_linear_idx_real_part(const unsigned int i) {
@@ -456,7 +466,7 @@ struct WarpTiler {
         // Solving for logical_idx_in_tile_strided = threadIdx.x - tile_idx * warp_size - i_read * n_tile_reads_per_cycle
 
         // This will only be a valid index for a return value >= 0 < n_tile_reads_per_cycle which determines if we are an active consumer thread
-        if constexpr ( FFT::stride > 32 )
+        if constexpr ( FFT::stride >= 32 )
             return threadIdx.x - tile_idx * warp_size - i_read * tile_thread_dim_strided;
         else
             return threadIdx.x - i_read * tile_thread_dim_strided;
@@ -1022,9 +1032,67 @@ struct io {
 
 #if defined(C2R_BUFFER_LINES) && defined(USE_FOLDED_C2R)
     // EnableIf<real_fft_mode_of<FFT>::value == real_mode::folded>
+
+#ifdef C2R_BUFFER_LINES_SHARED
+    template <typename data_io_t>
+    static inline __device__ void load_c2r_transposed_coalesced(const data_io_t* __restrict__ input,
+                                                                complex_compute_t* __restrict__ thread_data,
+                                                                scalar_compute_t* __restrict__ smem_buffer,
+                                                                const unsigned int pixel_pitch,
+                                                                const unsigned int SignalLength = FFT::input_length) {
+
+        WarpTiler<FFT, max_threads_per_block, n_coalesced_ffts> warp_tiler(get_lane_id( ));
+
+        constexpr int smem_y_dimension_floats = FFT::stride * 2;
+
+        unsigned int       y_prime = threadIdx.y + n_coalesced_ffts * (threadIdx.x / (2 * n_coalesced_ffts));
+        const unsigned int x_prime = threadIdx.x % (2 * n_coalesced_ffts);
+
+        const unsigned int smem_idx = threadIdx.x % 2 + 2 * y_prime + (x_prime / 2) * smem_y_dimension_floats;
+        for ( unsigned int i = 0; i < FFT::input_ept; i++ ) {
+            // if ( blockIdx.y == 0 )
+            // printf("tidx/y %i,%i x/yprime %i,%i i:%i  bank:%i smem1/2 %i, %i re:%i fft:%i, smdim%i\n", threadIdx.x, threadIdx.y, x_prime, y_prime, i, smem_idx % 32, smem_idx, smem_idx + FFT::stride, x_prime % 2, (x_prime / 2), smem_y_dimension_floats);
+            // Unlike the warp shuffle, we have the same total number of threads, so we we don't need a loop over  warp_tiler.n_tile_reads_per_cycle
+            // But we do still need 2 reads since we are reading as 4 bytes
+            bool  read_value_in = y_prime < SignalLength;
+            float read_val      = read_value_in
+                                          ? reinterpret_cast<const float*>(input)[y_prime * pixel_pitch + x_prime + (2 * blockIdx.y * n_coalesced_ffts)]
+                                          : warp_tiler.invalid_read_v;
+
+            // TODO: x_prime % 2 = re vs im part of the read
+            // (x_prime / n_coalesced_ffts) = fft index
+            // tidx // NY * NY + tidy
+            if ( read_value_in ) {
+                smem_buffer[smem_idx] = read_val;
+            }
+            y_prime += FFT::stride / 2;
+            __syncthreads( );
+            // now read the second leg
+            read_val =
+                    read_value_in ? reinterpret_cast<const float*>(input)[y_prime * pixel_pitch + x_prime + (2 * blockIdx.y * n_coalesced_ffts)] : warp_tiler.invalid_read_v;
+
+            // TODO: this wil lneed to be looked at for bank conflicts
+            if ( read_value_in ) {
+                smem_buffer[smem_idx + FFT::stride / 2] = read_val;
+            }
+            y_prime += FFT::stride / 2;
+
+            __syncthreads( );
+
+            // if ( threadIdx.x + i * FFT::stride < SignalLength )
+            //     thread_data[i] = reinterpret_cast<const complex_compute_t*>(smem_buffer)[threadIdx.x + threadIdx.y * FFT::stride];
+
+            if ( threadIdx.x + i * FFT::stride < SignalLength )
+                thread_data[i] = convert_if_needed<FFT, complex_compute_t>(smem_buffer, 2 * threadIdx.x + threadIdx.y * 2 * FFT::stride);
+            __syncthreads( );
+        }
+    }
+#else // in register
+
     template <typename data_io_t>
     static inline __device__ void load_c2r_transposed_coalesced(const data_io_t* __restrict__ input,
                                                                 scalar_compute_t* __restrict__ thread_data,
+                                                                scalar_compute_t* __restrict__ smem_buffer,
                                                                 const unsigned int pixel_pitch,
                                                                 const unsigned int SignalLength = FFT::input_length) {
 
@@ -1061,6 +1129,8 @@ struct io {
             }
         }
     }
+#endif
+
 #endif
 
     static inline __device__ void

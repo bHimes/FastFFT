@@ -47,6 +47,8 @@ d_ReturnReal1DAddressFromPhysicalCoord(int3 coords, short4 img_dims) {
     return ((((int)coords.z * (int)img_dims.y + coords.y) * (int)img_dims.w * 2) + (int)coords.x);
 }
 
+
+
 } // namespace FastFFT
 
 #endif

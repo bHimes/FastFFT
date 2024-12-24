@@ -88,6 +88,23 @@ __device__ __forceinline__ unsigned int calc_lane_id( ) {
     return threadIdx.x & replaceme_warpSize_minus1;
 }
 
+// constexpr bool allow_c2c_cache_sets = false;
+// constexpr bool allow_c2r_cache_sets = false;
+// constexpr bool allow_r2c_cache_sets = false;
+
+// // Wrapper that allows cleaner ifdefing
+// template <class FFT>
+// void SetCudaFuncCache(const void* func, cudaFuncCache wantedFuncCache) {
+//     using namespace cufftdx;
+
+//     if constexpr ( type_of<FFT>::value == fft_type::c2c && allow_c2c_cache_sets )
+//         cudaErr(cudaFuncSetCacheConfig(func, wantedFuncCache));
+//     else if constexpr ( type_of<FFT>::value == fft_type::c2r && allow_c2r_cache_sets )
+//         cudaErr(cudaFuncSetCacheConfig(func, wantedFuncCache));
+//     else if constexpr ( type_of<FFT>::value == fft_type::r2c && allow_r2c_cache_sets )
+//         cudaErr(cudaFuncSetCacheConfig(func, wantedFuncCache));
+// };
+
 } // namespace FastFFT
 
 #endif // __INCLUDE_DETAIL_DEVICE_FUNCTIONS_H__

@@ -45,6 +45,7 @@ Defined in src/FastFFT.h
     int max_shared_memory_per_SM;
     int max_registers_per_block;
     int max_persisting_L2_cache_size;
+    int L2_cache_size;
   } DeviceProps;
 ```
 

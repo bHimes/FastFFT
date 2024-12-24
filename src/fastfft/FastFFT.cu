@@ -16,7 +16,7 @@
 #endif
 
 #ifndef c2r_multiplier
-#define c2r_multiplier 2
+#define c2r_multiplier 4
 #endif
 
 #ifndef minBlocksPerMultiprocessor
@@ -39,9 +39,9 @@ struct check_and_set_ept {
 // FIXME: THE SAME logic should be applied if USE_FOLDED_R2C is implemented
 #ifdef USE_FOLDED_C2R
 #ifdef C2R_BUFFER_LINES
-    // FIXME: for now assuming size 64 so set to 2 to get 32 threads, may not be needed (min ept must actually be 4)
+    // FIXME: for now assuming size 64 so set to 2 to get 32 threads, may not be needed (min ept must actually be 4) revert
     using check_ept = std::conditional_t<type_of<Description>::value == fft_type::c2r,
-                                         cufftdx::replace_t<Description, ElementsPerThread<std::min(8u, Description::elements_per_thread * 2u)>>,
+                                         cufftdx::replace_t<Description, ElementsPerThread<std::min(4u, Description::elements_per_thread * 4u)>>,
                                          Description>;
 #else
     using check_ept = std::conditional_t<type_of<Description>::value == fft_type::c2r,
@@ -1639,18 +1639,34 @@ __launch_bounds__(MAX_TPB) __global__
     using complex_compute_t = typename FFT::value_type;
     using scalar_compute_t  = typename complex_compute_t::value_type;
 
+    constexpr unsigned int         shared_mem_buffer_offset = FFT::shared_memory_size / sizeof(complex_compute_t);
     FastFFT_SMEM complex_compute_t shared_mem[];
+    scalar_compute_t*              data_buffer = (scalar_compute_t*)&shared_mem[shared_mem_buffer_offset * n_ffts];
 
     // when C2R_BUFFER_LINES and nthreadsx < 32 this will be wasted on the Y threads, but no biggie
+#ifdef C2R_BUFFER_LINES_SHARED
+    complex_compute_t thread_data[FFT::storage_size];
+#else
     complex_compute_t thread_data[FFT::storage_size * n_ffts];
+#endif
 
     // Total concurent FFTs, n-1 in shared and then on in thread data
     if constexpr ( n_ffts > 1 && sizeof(scalar_compute_t) == 4 && size_of<FFT>::value > 16 ) {
 #ifdef C2R_BUFFER_LINES
+
+#ifdef C2R_BUFFER_LINES_SHARED
+        io<FFT, MAX_TPB, n_ffts>::load_c2r_transposed_coalesced(&input_values[ReturnZplane(gridDim.y * n_ffts * 2, mem_offsets.physical_x_input)],
+                                                                thread_data,
+                                                                data_buffer,
+                                                                gridDim.y * n_ffts * 2);
+        FFT( ).execute(thread_data, shared_mem, workspace);
+
+#else
         // we reduce the number of blocks in y by buffer_lines so to get the pitch we need to multiply by the number of blocks
         // TODO: probably need to check we don't pick a weird odd number or something.
         io<FFT, MAX_TPB, n_ffts>::load_c2r_transposed_coalesced(&input_values[ReturnZplane(gridDim.y * n_ffts * 2, mem_offsets.physical_x_input)],
                                                                 (scalar_compute_t*)thread_data,
+                                                                data_buffer,
                                                                 gridDim.y * n_ffts * 2);
 
 // // For loop zero the twiddles don't need to be computed
@@ -1658,6 +1674,8 @@ __launch_bounds__(MAX_TPB) __global__
         for ( int i_fft = 0; i_fft < n_ffts; i_fft++ ) {
             FFT( ).execute(&thread_data[i_fft * FFT::storage_size], shared_mem, workspace);
         }
+
+#endif // shared
 #else
         static_assert(n_ffts == 1, "C2R_BUFFER_LINES must be enabled, should not get hereonly for n_ffts == 1");
 #endif
@@ -1672,6 +1690,13 @@ __launch_bounds__(MAX_TPB) __global__
     }
 
 #ifdef C2R_BUFFER_LINES
+#ifdef C2R_BUFFER_LINES_SHARED
+    // normally  Return1DFFTAddress(mem_offsets.physical_x_output) = pixel_pitch * (blockIdx.y + blockIdx.z * gridDim.y)
+    // we reduce the number of blocks in Y by n_ffts, hysical_x = fft_idx + blockIdx.y * n_coalesced_ffts;
+    io<FFT>::store_c2r(thread_data,
+                       &output_values[mem_offsets.physical_x_output * (blockIdx.y * n_ffts + threadIdx.y)]); // FIXME only 2d
+#else
+
     // #pragma unroll(n_ffts)
     for ( int i_fft = 0; i_fft < n_ffts; i_fft++ ) {
         // normally  Return1DFFTAddress(mem_offsets.physical_x_output) = pixel_pitch * (blockIdx.y + blockIdx.z * gridDim.y)
@@ -1679,7 +1704,7 @@ __launch_bounds__(MAX_TPB) __global__
         io<FFT>::store_c2r(&thread_data[i_fft * FFT::storage_size],
                            &output_values[mem_offsets.physical_x_output * (blockIdx.y * n_ffts + i_fft)]); // FIXME only 2d
     }
-
+#endif
 #else
     io<FFT>::store_c2r(thread_data, &output_values[Return1DFFTAddress(mem_offsets.physical_x_output)]);
 #endif
@@ -2619,8 +2644,21 @@ void FourierTransformer<ComputeBaseType, InputType, OtherImageType, Rank>::SetAn
                                                                                                                          : 4; //std::max(min_buffer_lines, 4u);
 
                     LP.gridDims.y /= n_buffer_lines;
-                    // FIXME assuming we get a multiple of 32
-                    constexpr unsigned int max_threads_per_block = FFT::max_threads_per_block; // revert
+#ifdef C2R_BUFFER_LINES_SHARED
+                    // For the shared impl, we need more threads in y each will workin on the subfft
+                    constexpr unsigned int max_threads_per_block = FFT::max_threads_per_block * n_buffer_lines;
+                    static_assert(max_threads_per_block < 1025, "C2R_BUFFER_LINES resulting in too many threads per block.");
+                    if ( n_buffer_lines > 1 ) {
+                        LP.threadsPerBlock.y = n_buffer_lines;
+                        // TODO: other asserts, but basically, for the buffering we want to have at least 32 threads per block, and we can't modify x
+                    }
+
+                    // Add enough shared mem to swap on each read
+                    shared_memory = FFT::shared_memory_size * n_buffer_lines + FFT::stride * n_buffer_lines * sizeof(complex_compute_t);
+#else
+                    constexpr unsigned int max_threads_per_block = FFT::max_threads_per_block;
+
+#endif
 
 #else
 
@@ -2628,6 +2666,8 @@ void FourierTransformer<ComputeBaseType, InputType, OtherImageType, Rank>::SetAn
                     constexpr unsigned int max_threads_per_block = FFT::max_threads_per_block;
 #endif
                     CheckSharedMemory(shared_memory, device_properties);
+
+                    PrintLaunchParameters(LP);
 
 #if FFT_DEBUG_STAGE > 6
                     cudaErr(cudaFuncSetAttribute((void*)block_fft_kernel_C2R_NONE_XY<FFT, max_threads_per_block, data_buffer_t, data_io_t, n_buffer_lines>, cudaFuncAttributeMaxDynamicSharedMemorySize, shared_memory));
@@ -2695,8 +2735,23 @@ void FourierTransformer<ComputeBaseType, InputType, OtherImageType, Rank>::SetAn
 
                     CheckSharedMemory(shared_memory, device_properties);
 
+                    // size_t size = min(int(device_properties.L2_cache_size * 1.0), device_properties.max_persisting_L2_cache_size);
+                    // cudaDeviceSetLimit(cudaLimitPersistingL2CacheSize, size); // set-aside 3/4 of L2 cache for persisting accesses or the max allowed
+
+                    // size_t window_size = std::min(device_properties.accessPolicyMaxWindowSize, int(n_bytes_allocated / 2)); // Select minimum of user defined num_bytes and max window size.
+
+                    // cudaStreamAttrValue stream_attribute; // Stream level attributes data structure
+                    // stream_attribute.accessPolicyWindow.num_bytes = window_size; // Number of bytes for persistence access
+                    // stream_attribute.accessPolicyWindow.hitRatio  = 1.0; // Hint for cache hit ratio
+                    // stream_attribute.accessPolicyWindow.hitProp   = cudaAccessPropertyPersisting; // Persistence Property
+                    // stream_attribute.accessPolicyWindow.missProp  = cudaAccessPropertyStreaming; // Type of access property on cache miss
+
 #if FFT_DEBUG_STAGE > 6
-                    cudaErr(cudaFuncSetAttribute((void*)block_fft_kernel_C2R_DECREASE_XY<FFT, data_buffer_t, data_io_t>, cudaFuncAttributeMaxDynamicSharedMemorySize, shared_memory));
+                    // cudaErr(cudaDeviceSetSharedMemConfig(cudaSharedMemBankSizeEightByte)); //cudaSharedMemBankSizeDefault
+                    // cudaErr(cudaFuncSetCacheConfig((void*)block_fft_kernel_C2R_DECREASE_XY<FFT, data_buffer_t, data_io_t>, cudaFuncCachePreferL1)); //
+                    // cudaErr(cudaFuncSetSharedMemConfig((const void*)block_fft_kernel_C2R_DECREASE_XY<FFT, data_buffer_t, data_io_t>, cudaSharedMemBankSizeEightByte));
+                    // SetCudaFuncCache((const void*)block_fft_kernel_C2R_DECREASE_XY<FFT, data_buffer_t, data_io_t>, cudaFuncCachePreferL1);
+
                     if constexpr ( Rank == 1 ) {
                         precheck;
                         block_fft_kernel_C2R_DECREASE_XY<FFT, data_buffer_t, data_io_t><<<LP.gridDims, LP.threadsPerBlock, shared_memory, cudaStreamPerThread>>>(
@@ -2713,6 +2768,8 @@ void FourierTransformer<ComputeBaseType, InputType, OtherImageType, Rank>::SetAn
                         // current buffer is set correctly.
                         MyFFTDebugAssertTrue(current_buffer == fastfft_internal_buffer_1 || current_buffer == fastfft_internal_buffer_2, "current_buffer != fastfft_internal_buffer_1/2");
                         if ( current_buffer == fastfft_internal_buffer_1 ) {
+                            // stream_attribute.accessPolicyWindow.base_ptr = reinterpret_cast<void*>(d_ptr.buffer_1); // Global Memory data pointer
+                            // cudaStreamSetAttribute(cudaStreamPerThread, cudaStreamAttributeAccessPolicyWindow, &stream_attribute);
                             precheck;
                             block_fft_kernel_C2R_DECREASE_XY<FFT, data_buffer_t, data_io_t><<<LP.gridDims, LP.threadsPerBlock, shared_memory, cudaStreamPerThread>>>(
                                     d_ptr.buffer_1,
@@ -2724,6 +2781,8 @@ void FourierTransformer<ComputeBaseType, InputType, OtherImageType, Rank>::SetAn
                             postcheck;
                         }
                         else if ( current_buffer == fastfft_internal_buffer_2 ) {
+                            // stream_attribute.accessPolicyWindow.base_ptr = reinterpret_cast<void*>(d_ptr.buffer_2); // Global Memory data pointer
+                            // cudaStreamSetAttribute(cudaStreamPerThread, cudaStreamAttributeAccessPolicyWindow, &stream_attribute);
                             precheck;
                             block_fft_kernel_C2R_DECREASE_XY<FFT, data_buffer_t, data_io_t><<<LP.gridDims, LP.threadsPerBlock, shared_memory, cudaStreamPerThread>>>(
                                     d_ptr.buffer_2,
@@ -2734,9 +2793,12 @@ void FourierTransformer<ComputeBaseType, InputType, OtherImageType, Rank>::SetAn
                                     workspace);
                             postcheck;
                         }
+                        // stream_attribute.accessPolicyWindow.num_bytes = 0; // Setting the window size to 0 disable it
+                        // cudaStreamSetAttribute(cudaStreamPerThread, cudaStreamAttributeAccessPolicyWindow, &stream_attribute); // Overwrite the access policy attribute to a CUDA Stream
+                        // cudaCtxResetPersistingL2Cache( );
                     }
                     current_buffer = aliased_output_buffer;
-
+                    // cudaErr(cudaDeviceSetSharedMemConfig(cudaSharedMemBankSizeDefault)); //
 #endif
                 }
                 break;
@@ -3171,6 +3233,8 @@ void GetCudaDeviceProps(DeviceProps& dp) {
     cudaErr(cudaDeviceGetAttribute(&dp.max_shared_memory_per_SM, cudaDevAttrMaxSharedMemoryPerMultiprocessor, dp.device_id));
     cudaErr(cudaDeviceGetAttribute(&dp.max_registers_per_block, cudaDevAttrMaxRegistersPerBlock, dp.device_id));
     cudaErr(cudaDeviceGetAttribute(&dp.max_persisting_L2_cache_size, cudaDevAttrMaxPersistingL2CacheSize, dp.device_id));
+    cudaErr(cudaDeviceGetAttribute(&dp.L2_cache_size, cudaDevAttrL2CacheSize, dp.device_id));
+    cudaErr(cudaDeviceGetAttribute(&dp.accessPolicyMaxWindowSize, cudaDevAttrMaxAccessPolicyWindowSize, dp.device_id));
 }
 
 void CheckSharedMemory(int& memory_requested, DeviceProps& dp) {
