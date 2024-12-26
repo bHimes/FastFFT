@@ -2671,6 +2671,8 @@ void FourierTransformer<ComputeBaseType, InputType, OtherImageType, Rank>::SetAn
                     CheckSharedMemory(shared_memory, device_properties);
 
                     // PrintLaunchParameters(LP);
+                    // std::cerr << "max tpb " << max_threads_per_block << " n_buffer " << n_buffer_lines << std::endl;
+                    // exit(0);
 
 #if FFT_DEBUG_STAGE > 6
                     cudaErr(cudaFuncSetAttribute((void*)block_fft_kernel_C2R_NONE_XY<FFT, max_threads_per_block, data_buffer_t, data_io_t, n_buffer_lines>, cudaFuncAttributeMaxDynamicSharedMemorySize, shared_memory));

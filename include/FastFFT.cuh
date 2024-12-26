@@ -1051,6 +1051,14 @@ struct io {
         //
         // 0 1 2 3 0 1 2 3
 
+        // unsigned int index = threadIdx.x;
+        // for ( unsigned int i = 0; i < FFT::input_ept; i++ ) {
+        //     if ( index < SignalLength ) {
+        //         thread_data[i] = convert_if_needed<FFT, complex_compute_t>(input, Return1DFFTAddress_transpose_XY(index, pixel_pitch));
+        //         index += FFT::stride;
+        //     }
+        // }/
+
         unsigned int index = threadIdx.x;
         // 0 1 2 3 0 1 2 3 + 4 * (0 0 0 0 1 1 1 1) = 0 1 2 3 4 5 6 7 ...
         unsigned int       x_prime = threadIdx.y + n_coalesced_ffts * (threadIdx.x / n_coalesced_ffts);
@@ -1058,6 +1066,7 @@ struct io {
 
         const unsigned int smem_idx = x_prime + fft_idx * FFT::stride;
         for ( unsigned int i = 0; i < FFT::input_ept; i++ ) {
+            __syncthreads( );
 
             if ( x_prime < SignalLength )
                 smem_buffer[smem_idx] = convert_if_needed<FFT, complex_compute_t>(input, x_prime * pixel_pitch + fft_idx + blockIdx.y * n_coalesced_ffts);
@@ -1067,6 +1076,7 @@ struct io {
                 thread_data[i] = convert_if_needed<FFT, complex_compute_t>(smem_buffer, threadIdx.x + threadIdx.y * FFT::stride);
             __syncthreads( );
 
+            x_prime += FFT::stride;
             index += FFT::stride;
         }
     }
