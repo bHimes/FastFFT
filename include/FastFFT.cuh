@@ -1037,54 +1037,37 @@ struct io {
     template <typename data_io_t>
     static inline __device__ void load_c2r_transposed_coalesced(const data_io_t* __restrict__ input,
                                                                 complex_compute_t* __restrict__ thread_data,
-                                                                scalar_compute_t* __restrict__ smem_buffer,
+                                                                complex_compute_t* __restrict__ smem_buffer,
                                                                 const unsigned int pixel_pitch,
                                                                 const unsigned int SignalLength = FFT::input_length) {
 
-        WarpTiler<FFT, max_threads_per_block, n_coalesced_ffts> warp_tiler(get_lane_id( ));
+        // We normally have FFT::stride threads in x (blockDim.x) and nFFTs as gridDim.y
+        // To help with coalescing, we add n_coalesced_ffts threads in y (blockDim.y) reduce gridDim.y by the same
+        // To avoid bank conflicts we organize this 2d tile by tid.x x tid.y
+        // 0 0 0 0 4 4 4 4   x
+        // 1 1 1 1 5 5 5 5
+        // 2 2 2 2 6 6 6 6
+        // 3 3 3 3 7 7 7 7
+        //
+        // 0 1 2 3 0 1 2 3
 
-        constexpr int smem_y_dimension_floats = FFT::stride * 2;
+        unsigned int index = threadIdx.x;
+        // 0 1 2 3 0 1 2 3 + 4 * (0 0 0 0 1 1 1 1) = 0 1 2 3 4 5 6 7 ...
+        unsigned int       x_prime = threadIdx.y + n_coalesced_ffts * (threadIdx.x / n_coalesced_ffts);
+        const unsigned int fft_idx = threadIdx.x % n_coalesced_ffts; // change to fft_idx
 
-        unsigned int       y_prime = threadIdx.y + n_coalesced_ffts * (threadIdx.x / (2 * n_coalesced_ffts));
-        const unsigned int x_prime = threadIdx.x % (2 * n_coalesced_ffts);
-
-        const unsigned int smem_idx = threadIdx.x % 2 + 2 * y_prime + (x_prime / 2) * smem_y_dimension_floats;
+        const unsigned int smem_idx = x_prime + fft_idx * FFT::stride;
         for ( unsigned int i = 0; i < FFT::input_ept; i++ ) {
-            // if ( blockIdx.y == 0 )
-            // printf("tidx/y %i,%i x/yprime %i,%i i:%i  bank:%i smem1/2 %i, %i re:%i fft:%i, smdim%i\n", threadIdx.x, threadIdx.y, x_prime, y_prime, i, smem_idx % 32, smem_idx, smem_idx + FFT::stride, x_prime % 2, (x_prime / 2), smem_y_dimension_floats);
-            // Unlike the warp shuffle, we have the same total number of threads, so we we don't need a loop over  warp_tiler.n_tile_reads_per_cycle
-            // But we do still need 2 reads since we are reading as 4 bytes
-            bool  read_value_in = y_prime < SignalLength;
-            float read_val      = read_value_in
-                                          ? reinterpret_cast<const float*>(input)[y_prime * pixel_pitch + x_prime + (2 * blockIdx.y * n_coalesced_ffts)]
-                                          : warp_tiler.invalid_read_v;
 
-            // TODO: x_prime % 2 = re vs im part of the read
-            // (x_prime / n_coalesced_ffts) = fft index
-            // tidx // NY * NY + tidy
-            if ( read_value_in ) {
-                smem_buffer[smem_idx] = read_val;
-            }
-            y_prime += FFT::stride / 2;
-            __syncthreads( );
-            // now read the second leg
-            read_val =
-                    read_value_in ? reinterpret_cast<const float*>(input)[y_prime * pixel_pitch + x_prime + (2 * blockIdx.y * n_coalesced_ffts)] : warp_tiler.invalid_read_v;
-
-            // TODO: this wil lneed to be looked at for bank conflicts
-            if ( read_value_in ) {
-                smem_buffer[smem_idx + FFT::stride / 2] = read_val;
-            }
-            y_prime += FFT::stride / 2;
-
+            if ( x_prime < SignalLength )
+                smem_buffer[smem_idx] = convert_if_needed<FFT, complex_compute_t>(input, x_prime * pixel_pitch + fft_idx + blockIdx.y * n_coalesced_ffts);
             __syncthreads( );
 
-            // if ( threadIdx.x + i * FFT::stride < SignalLength )
-            //     thread_data[i] = reinterpret_cast<const complex_compute_t*>(smem_buffer)[threadIdx.x + threadIdx.y * FFT::stride];
-
-            if ( threadIdx.x + i * FFT::stride < SignalLength )
-                thread_data[i] = convert_if_needed<FFT, complex_compute_t>(smem_buffer, 2 * threadIdx.x + threadIdx.y * 2 * FFT::stride);
+            if ( index < SignalLength )
+                thread_data[i] = convert_if_needed<FFT, complex_compute_t>(smem_buffer, threadIdx.x + threadIdx.y * FFT::stride);
             __syncthreads( );
+
+            index += FFT::stride;
         }
     }
 #else // in register
@@ -1305,6 +1288,7 @@ struct io {
 
             if ( index < memory_limit )
                 output[index] = convert_if_needed<FFT, data_io_t>(thread_data, i);
+
             index += FFT::stride;
         }
     }

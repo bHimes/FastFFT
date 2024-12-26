@@ -40,8 +40,12 @@ struct check_and_set_ept {
 #ifdef USE_FOLDED_C2R
 #ifdef C2R_BUFFER_LINES
     // FIXME: for now assuming size 64 so set to 2 to get 32 threads, may not be needed (min ept must actually be 4) revert
+    static constexpr unsigned int using_ept = size_of<Description>::value < 256 ? 4 : size_of<Description>::value < 1024 ? 8
+                                                                              : size_of<Description>::value < 4096       ? 16
+                                                                                                                         : 32;
+
     using check_ept = std::conditional_t<type_of<Description>::value == fft_type::c2r,
-                                         cufftdx::replace_t<Description, ElementsPerThread<std::min(4u, Description::elements_per_thread * 4u)>>,
+                                         cufftdx::replace_t<Description, ElementsPerThread<using_ept>>,
                                          Description>;
 #else
     using check_ept = std::conditional_t<type_of<Description>::value == fft_type::c2r,
@@ -1639,9 +1643,8 @@ __launch_bounds__(MAX_TPB) __global__
     using complex_compute_t = typename FFT::value_type;
     using scalar_compute_t  = typename complex_compute_t::value_type;
 
-    constexpr unsigned int         shared_mem_buffer_offset = FFT::shared_memory_size / sizeof(complex_compute_t);
-    FastFFT_SMEM complex_compute_t shared_mem[];
-    scalar_compute_t*              data_buffer = (scalar_compute_t*)&shared_mem[shared_mem_buffer_offset * n_ffts];
+    FastFFT_SMEM complex_compute_t data_buffer[];
+    complex_compute_t*             shared_mem = &data_buffer[FFT::stride * n_ffts];
 
     // when C2R_BUFFER_LINES and nthreadsx < 32 this will be wasted on the Y threads, but no biggie
 #ifdef C2R_BUFFER_LINES_SHARED
@@ -1655,13 +1658,14 @@ __launch_bounds__(MAX_TPB) __global__
 #ifdef C2R_BUFFER_LINES
 
 #ifdef C2R_BUFFER_LINES_SHARED
-        io<FFT, MAX_TPB, n_ffts>::load_c2r_transposed_coalesced(&input_values[ReturnZplane(gridDim.y * n_ffts * 2, mem_offsets.physical_x_input)],
+        io<FFT, MAX_TPB, n_ffts>::load_c2r_transposed_coalesced(&input_values[ReturnZplane(gridDim.y * n_ffts, mem_offsets.physical_x_input)],
                                                                 thread_data,
                                                                 data_buffer,
-                                                                gridDim.y * n_ffts * 2);
-        FFT( ).execute(thread_data, shared_mem, workspace);
+                                                                gridDim.y * n_ffts);
+        FFT( ).execute(thread_data, &shared_mem[FFT::shared_memory_size / sizeof(complex_compute_t) * threadIdx.y], workspace);
 
 #else
+        //
         // we reduce the number of blocks in y by buffer_lines so to get the pitch we need to multiply by the number of blocks
         // TODO: probably need to check we don't pick a weird odd number or something.
         io<FFT, MAX_TPB, n_ffts>::load_c2r_transposed_coalesced(&input_values[ReturnZplane(gridDim.y * n_ffts * 2, mem_offsets.physical_x_input)],
@@ -2642,7 +2646,6 @@ void FourierTransformer<ComputeBaseType, InputType, OtherImageType, Rank>::SetAn
                     constexpr unsigned int n_buffer_lines   = size_of<FFT>::value < 32u ? 1 : size_of<FFT>::value < 128u ? std::max(min_buffer_lines, 2u)
                                                                                       : size_of<FFT>::value < 512        ? std::max(min_buffer_lines, 4u)
                                                                                                                          : 4; //std::max(min_buffer_lines, 4u);
-
                     LP.gridDims.y /= n_buffer_lines;
 #ifdef C2R_BUFFER_LINES_SHARED
                     // For the shared impl, we need more threads in y each will workin on the subfft
@@ -2667,7 +2670,7 @@ void FourierTransformer<ComputeBaseType, InputType, OtherImageType, Rank>::SetAn
 #endif
                     CheckSharedMemory(shared_memory, device_properties);
 
-                    PrintLaunchParameters(LP);
+                    // PrintLaunchParameters(LP);
 
 #if FFT_DEBUG_STAGE > 6
                     cudaErr(cudaFuncSetAttribute((void*)block_fft_kernel_C2R_NONE_XY<FFT, max_threads_per_block, data_buffer_t, data_io_t, n_buffer_lines>, cudaFuncAttributeMaxDynamicSharedMemorySize, shared_memory));
