@@ -7,7 +7,6 @@
 // #define USE_FOLDED_R2C_C2R
 #define USE_FOLDED_C2R
 #define C2R_BUFFER_LINES
-#define C2R_BUFFER_LINES_SHARED
 
 // cudaErr(cudaFuncSetSharedMemConfig((const void*)block_fft_kernel_C2R_DECREASE_XY<FFT, data_buffer_t, data_io_t>, cudaSharedMemBankSizeEightByte));
 
@@ -1008,8 +1007,6 @@ struct io {
                                                       complex_compute_t* __restrict__ thread_data,
                                                       const unsigned int pixel_pitch,
                                                       const unsigned int SignalLength = FFT::input_length) {
-#ifdef USE_FOLDED_C2R
-        static_assert(real_fft_mode_of<FFT>::value == real_mode::folded, "Folded C2R only supported for folded real FFTs");
         // Note: for c2r FFT::input_ept = N/2+1 whether folded or not, so this block would also work for normal c2r it also allows us to specify a non-fft signal length at the cost of extra branching
         unsigned int index = threadIdx.x;
         for ( unsigned int i = 0; i < FFT::input_ept; i++ ) {
@@ -1018,22 +1015,11 @@ struct io {
                 index += FFT::stride;
             }
         }
-#else
-        unsigned int index = threadIdx.x;
-        for ( unsigned int i = 0; i < FFT::elements_per_thread / 2; i++ ) {
-            thread_data[i] = convert_if_needed<FFT, complex_compute_t>(input, Return1DFFTAddress_transpose_XY(index, pixel_pitch));
-            index += FFT::stride;
-        }
-        if ( threadIdx.x == 0 ) {
-            thread_data[FFT::elements_per_thread / 2] = convert_if_needed<FFT, complex_compute_t>(input, Return1DFFTAddress_transpose_XY(index, pixel_pitch));
-        }
-#endif
     }
 
 #if defined(C2R_BUFFER_LINES) && defined(USE_FOLDED_C2R)
     // EnableIf<real_fft_mode_of<FFT>::value == real_mode::folded>
 
-#ifdef C2R_BUFFER_LINES_SHARED
     template <typename data_io_t>
     static inline __device__ void load_c2r_transposed_coalesced(const data_io_t* __restrict__ input,
                                                                 complex_compute_t* __restrict__ thread_data,
@@ -1064,9 +1050,10 @@ struct io {
         unsigned int       x_prime = threadIdx.y + n_coalesced_ffts * (threadIdx.x / n_coalesced_ffts);
         const unsigned int fft_idx = threadIdx.x % n_coalesced_ffts; // change to fft_idx
 
+        // n_coalesced_ffts will read the 0th index of each FFT, so we want to offset the write into smem so we write into banks 0 1 2 3
+        // the next thread in this warp will be reading at the 4th index
         const unsigned int smem_idx = x_prime + fft_idx * FFT::stride;
         for ( unsigned int i = 0; i < FFT::input_ept; i++ ) {
-            __syncthreads( );
 
             if ( x_prime < SignalLength )
                 smem_buffer[smem_idx] = convert_if_needed<FFT, complex_compute_t>(input, x_prime * pixel_pitch + fft_idx + blockIdx.y * n_coalesced_ffts);
@@ -1080,49 +1067,6 @@ struct io {
             index += FFT::stride;
         }
     }
-#else // in register
-
-    template <typename data_io_t>
-    static inline __device__ void load_c2r_transposed_coalesced(const data_io_t* __restrict__ input,
-                                                                scalar_compute_t* __restrict__ thread_data,
-                                                                scalar_compute_t* __restrict__ smem_buffer,
-                                                                const unsigned int pixel_pitch,
-                                                                const unsigned int SignalLength = FFT::input_length) {
-
-        WarpTiler<FFT, max_threads_per_block, n_coalesced_ffts> warp_tiler(get_lane_id( ));
-        for ( unsigned int i = 0; i < FFT::input_ept; i++ ) {
-            for ( unsigned int i_tile = 0; i_tile < warp_tiler.n_tile_reads_per_cycle; i_tile++ ) {
-                // 4 / 2 = 2, min(2, 16) = 2
-                // read in as floats
-                const unsigned int data_index_to_read_1d_value = warp_tiler.data_index_to_read_1d(i, i_tile);
-                const float        read_val =
-                        data_index_to_read_1d_value < SignalLength ? reinterpret_cast<const float*>(input)[data_index_to_read_1d_value * pixel_pitch + warp_tiler.logical_idx_in_tile_fast + blockIdx.y * warp_tiler.tile_thread_dim_fast] : warp_tiler.invalid_read_v;
-
-                int        producer_thread_re_lane_idx = warp_tiler.get_producer_thread_re_lane_idx(i_tile);
-                const bool is_active_consumer          = producer_thread_re_lane_idx < warp_tiler.warp_size;
-
-                unsigned int thread_index = warp_tiler.thread_data_idx_real_part_fft_0(i);
-
-#pragma unroll(n_coalesced_ffts)
-                for ( int i_fft = 0; i_fft < n_coalesced_ffts; i_fft++ ) {
-                    float copied_val = __shfl_sync(0xFFFFFFFF, read_val, producer_thread_re_lane_idx, 32);
-                    if ( is_active_consumer && warp_tiler.invalid_read_v != copied_val ) {
-                        thread_data[thread_index] = copied_val;
-                    }
-                    producer_thread_re_lane_idx++;
-
-                    copied_val = __shfl_sync(0xFFFFFFFF, read_val, producer_thread_re_lane_idx, 32);
-                    if ( is_active_consumer && warp_tiler.invalid_read_v != copied_val ) {
-                        thread_data[thread_index + 1] = copied_val;
-                    }
-                    producer_thread_re_lane_idx++;
-                    thread_index += warp_tiler.thread_data_fft_stride;
-                }
-                __syncwarp( );
-            }
-        }
-    }
-#endif
 
 #endif
 
@@ -1410,6 +1354,7 @@ struct io {
             store_c2r(const complex_compute_t* __restrict__ thread_data,
                       data_io_t* __restrict__ output,
                       const unsigned int SignalLength = size_of<FFT>::value) {
+
 #ifdef USE_FOLDED_C2R
         static_assert(real_fft_mode_of<FFT>::value == real_mode::folded, "Folded C2R only supported for folded real FFTs");
 
