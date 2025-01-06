@@ -296,7 +296,6 @@ class FourierTransformer {
         std::cerr << "is_real_valued_input " << IsAllowedRealType<InputType> << std::endl;
         std::cerr << "is_set_input_params " << is_set_input_params << std::endl;
         std::cerr << "is_set_output_params " << is_set_output_params << std::endl;
-        std::cerr << "is_size_validated " << is_size_validated << std::endl;
         std::cerr << std::endl;
 
         std::cerr << "Size variables:\n"
@@ -344,7 +343,6 @@ class FourierTransformer {
 
     bool is_set_input_params; // Yes, yes, "are" set.
     bool is_set_output_params;
-    bool is_size_validated; // Defaults to false, set after both input/output dimensions are set and checked.
 
     int      transform_dimension; // 1,2,3d.
     FFT_Size transform_size;
@@ -373,7 +371,7 @@ class FourierTransformer {
     void Deallocate( );
 
     void SetDefaults( );
-    void ValidateDimensions( );
+    void ValidateDimensions(short4& dims_in, short4& dims_out, const bool is_fwd_not_inv);
     void SetDimensions(DimensionCheckType::Enum check_op_type);
 
     inline int ReturnPaddedMemorySize(short4& wanted_dims) {
@@ -687,6 +685,14 @@ class FourierTransformer {
             return false;
         else
             return true;
+    }
+
+    inline int GetNextPowerOfTwo(const int input_size) {
+        int tmp_val = 1;
+        while ( tmp_val < input_size )
+            tmp_val = tmp_val << 1;
+
+        return tmp_val;
     }
 
     inline void AssertDivisibleAndFactorOf2(KernelType kernel_type, int full_size_transform, const int number_non_zero_inputs_or_outputs) {

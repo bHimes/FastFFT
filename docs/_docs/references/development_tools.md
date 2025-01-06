@@ -108,7 +108,6 @@ FastFFT::PrintState()
     std::cout << "is_real_valued_input " << IsAllowedRealType<InputType>  << std::endl;
     std::cout << "is_set_input_params " << is_set_input_params << std::endl;
     std::cout << "is_set_output_params " << is_set_output_params << std::endl;
-    std::cout << "is_size_validated " << is_size_validated << std::endl;
     std::cout << std::endl;
 
     std::cout << "Size variables:\n" << std::endl;

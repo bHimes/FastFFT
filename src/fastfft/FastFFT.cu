@@ -151,7 +151,6 @@ void FourierTransformer<ComputeBaseType, InputType, OtherImageType, Rank>::SetDe
 
     is_set_input_params  = false; // Yes, yes, "are" set.
     is_set_output_params = false;
-    is_size_validated    = false; // Defaults to false, set after both input/output dimensions are set and checked.
 
     input_data_is_on_device     = false;
     output_data_is_on_device    = false;
@@ -199,36 +198,11 @@ void FourierTransformer<ComputeBaseType, InputType, OtherImageType, Rank>::SetFo
                                                                                              size_t output_logical_y_dimension,
                                                                                              size_t output_logical_z_dimension,
                                                                                              bool   is_padded_input) {
-    MyFFTDebugAssertTrue(input_logical_x_dimension > 0, "Input logical x dimension must be > 0");
-    MyFFTDebugAssertTrue(input_logical_y_dimension > 0, "Input logical y dimension must be > 0");
-    MyFFTDebugAssertTrue(input_logical_z_dimension > 0, "Input logical z dimension must be > 0");
-    MyFFTDebugAssertTrue(output_logical_x_dimension > 0, "output logical x dimension must be > 0");
-    MyFFTDebugAssertTrue(output_logical_y_dimension > 0, "output logical y dimension must be > 0");
-    MyFFTDebugAssertTrue(output_logical_z_dimension > 0, "output logical z dimension must be > 0");
 
-    std::array<bool, 6> valid_sizes = {false, false, false, false, false, false};
-    for ( auto& size : sizes_in_this_build ) {
-        std::cerr << "Size fwd " << size << std::endl;
-        if ( size == input_logical_x_dimension )
-            valid_sizes[0] = true;
-        if ( size == input_logical_y_dimension )
-            valid_sizes[1] = true;
-        if ( size == input_logical_z_dimension || input_logical_z_dimension == 1 )
-            valid_sizes[2] = true;
-        if ( size == output_logical_x_dimension )
-            valid_sizes[3] = true;
-        if ( size == output_logical_y_dimension )
-            valid_sizes[4] = true;
-        if ( size == output_logical_z_dimension || output_logical_z_dimension == 1 )
-            valid_sizes[5] = true;
-    }
-    for ( int i = 0; i < 6; i++ ) {
-        MyFFTRunTimeAssertTrue(valid_sizes[i], "Invalid size fwd kjldsf");
-    }
     fwd_dims_in  = make_short4(input_logical_x_dimension, input_logical_y_dimension, input_logical_z_dimension, 0);
     fwd_dims_out = make_short4(output_logical_x_dimension, output_logical_y_dimension, output_logical_z_dimension, 0);
+    ValidateDimensions(fwd_dims_in, fwd_dims_out, true);
 
-    is_fftw_padded_input = is_padded_input; // Note: Must be set before ReturnPaddedMemorySize
     MyFFTRunTimeAssertTrue(is_fftw_padded_input, "Support for input arrays that are not FFTW padded needs to be implemented."); // FIXME
 
     // ReturnPaddedMemorySize also sets FFTW padding etc.
@@ -241,8 +215,10 @@ void FourierTransformer<ComputeBaseType, InputType, OtherImageType, Rank>::SetFo
     this->input_origin_type = OriginType::natural;
     is_set_input_params     = true;
 
-    if ( is_set_output_params )
-        AllocateBufferMemory( ); // TODO:
+    // Only run when both input and output params are set
+    if ( is_set_output_params ) {
+        AllocateBufferMemory( );
+    }
 }
 
 /**
@@ -270,33 +246,12 @@ void FourierTransformer<ComputeBaseType, InputType, OtherImageType, Rank>::SetIn
                                                                                              size_t output_logical_y_dimension,
                                                                                              size_t output_logical_z_dimension,
                                                                                              bool   is_padded_output) {
-    MyFFTDebugAssertTrue(output_logical_x_dimension > 0, "output logical x dimension must be > 0");
-    MyFFTDebugAssertTrue(output_logical_y_dimension > 0, "output logical y dimension must be > 0");
-    MyFFTDebugAssertTrue(output_logical_z_dimension > 0, "output logical z dimension must be > 0");
-    MyFFTDebugAssertTrue(is_fftw_padded_input == is_padded_output, "If the input data are FFTW padded, so must the output.");
 
-    std::array<bool, 6> valid_sizes = {false, false, false, false, false, false};
-    for ( auto& size : sizes_in_this_build ) {
-        std::cerr << "Size " << size << std::endl;
-        if ( size == input_logical_x_dimension )
-            valid_sizes[0] = true;
-        if ( size == input_logical_y_dimension )
-            valid_sizes[1] = true;
-        if ( size == input_logical_z_dimension || input_logical_z_dimension == 1 )
-            valid_sizes[2] = true;
-        if ( size == output_logical_x_dimension )
-            valid_sizes[3] = true;
-        if ( size == output_logical_y_dimension )
-            valid_sizes[4] = true;
-        if ( size == output_logical_z_dimension || output_logical_z_dimension == 1 )
-            valid_sizes[5] = true;
-    }
-    for ( int i = 0; i < 6; i++ ) {
-        MyFFTRunTimeAssertTrue(valid_sizes[i], "Invalid size inv ljhksdaf");
-    }
+    MyFFTDebugAssertTrue(is_fftw_padded_input == is_padded_output, "If the input data are FFTW padded, so must the output.");
 
     inv_dims_in  = make_short4(input_logical_x_dimension, input_logical_y_dimension, input_logical_z_dimension, 0);
     inv_dims_out = make_short4(output_logical_x_dimension, output_logical_y_dimension, output_logical_z_dimension, 0);
+    ValidateDimensions(inv_dims_in, inv_dims_out, false);
 
     ReturnPaddedMemorySize(inv_dims_in); // sets .w and also increases compute_memory_wanted_ if needed.
     inv_output_memory_wanted_ = ReturnPaddedMemorySize(inv_dims_out);
@@ -304,8 +259,10 @@ void FourierTransformer<ComputeBaseType, InputType, OtherImageType, Rank>::SetIn
 
     this->output_origin_type = OriginType::natural;
     is_set_output_params     = true;
-    if ( is_set_input_params )
-        AllocateBufferMemory( ); // TODO:
+    // Only run when both input and output params are set
+    if ( is_set_input_params ) {
+        AllocateBufferMemory( );
+    }
 }
 
 /**
@@ -869,36 +826,45 @@ FourierTransformer<ComputeBaseType, InputType, OtherImageType, Rank>::Generic_Fw
 /// END PUBLIC METHODS
 ////////////////////////////////////////////////////
 template <class ComputeBaseType, class InputType, class OtherImageType, int Rank>
-void FourierTransformer<ComputeBaseType, InputType, OtherImageType, Rank>::ValidateDimensions( ) {
-    // TODO - runtime asserts would be better as these are breaking errors that are under user control.
-    // check to see if there is any measurable penalty for this.
+void FourierTransformer<ComputeBaseType, InputType, OtherImageType, Rank>::ValidateDimensions(short4& dims_in, short4& dims_out, const bool is_fwd_not_inv) {
 
-    MyFFTDebugAssertTrue(is_set_input_params, "Input parameters not set");
-    MyFFTDebugAssertTrue(is_set_output_params, "Output parameters not set");
+    /* Basic conditions on allowed (supported sizes)
+        - Transforms must be power of 2
+        - We need to confirm that this build includes the requested size
+        - Signal length may be non-power-2 for forward increase, as long as fwd output is an allowed size > signal length
+        - Current allowed cases require the fwd output size = inv input size as size changes are only from signal -> fourier or fourier -> signal
+        - Currently only allowing square or cubic images
+    */
 
-    MyFFTRunTimeAssertTrue(fwd_dims_out.x == inv_dims_in.x &&
-                                   fwd_dims_out.y == inv_dims_in.y &&
-                                   fwd_dims_out.z == inv_dims_in.z,
-                           "Error in validating the dimension: Currently all fwd out should match inv in.");
+    const bool params_set = is_fwd_not_inv ? is_set_input_params : is_set_output_params;
+    MyFFTRunTimeAssertTrue(params_set, "Parameters not set");
 
     // Validate the forward transform
     if ( fwd_dims_out.x > fwd_dims_in.x || fwd_dims_out.y > fwd_dims_in.y || fwd_dims_out.z > fwd_dims_in.z ) {
         // For now we must pad in all dimensions, this is not needed and should be lifted. FIXME
-        MyFFTDebugAssertTrue(fwd_dims_out.x >= fwd_dims_in.x, "If padding, all dimensions must be >=, x out < x in");
-        MyFFTDebugAssertTrue(fwd_dims_out.y >= fwd_dims_in.y, "If padding, all dimensions must be >=, y out < y in");
-        MyFFTDebugAssertTrue(fwd_dims_out.z >= fwd_dims_in.z, "If padding, all dimensions must be >=, z out < z in");
+        MyFFTRunTimeAssertTrue(dims_out.x >= dims_in.x, "If padding, all dimensions must be >=, x out < x in");
+        MyFFTRunTimeAssertTrue(dims_out.y >= dims_in.y, "If padding, all dimensions must be >=, y out < y in");
+        MyFFTRunTimeAssertTrue(dims_out.z >= dims_in.z, "If padding, all dimensions must be >=, z out < z in");
+        MyFFTRunTimeAssertTrue(IsAPowerOfTwo(dims_out.x) && IsAPowerOfTwo(dims_out.y) && IsAPowerOfTwo(dims_out.z), "Output dimensions must be a power of 2");
 
-        fwd_size_change_type = SizeChangeType::increase;
+        fwd_size_change_type          = SizeChangeType::increase;
+        fwd_implicit_dimension_change = ! (IsAPowerOfTwo(dims_out.x) && IsAPowerOfTwo(dims_out.y) && IsAPowerOfTwo(dims_out.z));
     }
     else if ( fwd_dims_out.x < fwd_dims_in.x || fwd_dims_out.y < fwd_dims_in.y || fwd_dims_out.z < fwd_dims_in.z ) {
         // For now we must pad in all dimensions, this is not needed and should be lifted. FIXME
-        MyFFTDebugAssertTrue(fwd_dims_out.x <= fwd_dims_in.x, "If padding, all dimensions must be <=, x out > x in");
-        MyFFTDebugAssertTrue(fwd_dims_out.y <= fwd_dims_in.y, "If padding, all dimensions must be <=, y out > y in");
-        MyFFTDebugAssertTrue(fwd_dims_out.z <= fwd_dims_in.z, "If padding, all dimensions must be <=, z out > z in");
+        MyFFTRunTimeAssertTrue(dims_out.x <= dims_in.x, "If padding, all dimensions must be <=, x out > x in");
+        MyFFTRunTimeAssertTrue(dims_out.y <= dims_in.y, "If padding, all dimensions must be <=, y out > y in");
+        MyFFTRunTimeAssertTrue(dims_out.z <= dims_in.z, "If padding, all dimensions must be <=, z out > z in");
+
+        MyFFTRunTimeAssertTrue(IsAPowerOfTwo(dims_in.x) && IsAPowerOfTwo(dims_in.y) && IsAPowerOfTwo(dims_in.z), "Input dimensions must be a power of 2");
+        MyFFTRunTimeAssertTrue(IsAPowerOfTwo(dims_out.x) && IsAPowerOfTwo(dims_out.y) && IsAPowerOfTwo(dims_out.z), "Output dimensions must be a power of 2");
 
         fwd_size_change_type = SizeChangeType::decrease;
     }
     else if ( fwd_dims_out.x == fwd_dims_in.x && fwd_dims_out.y == fwd_dims_in.y && fwd_dims_out.z == fwd_dims_in.z ) {
+        MyFFTRunTimeAssertTrue(IsAPowerOfTwo(dims_in.x) && IsAPowerOfTwo(dims_in.y) && IsAPowerOfTwo(dims_in.z), "Input dimensions must be a power of 2");
+        MyFFTRunTimeAssertTrue(IsAPowerOfTwo(dims_out.x) && IsAPowerOfTwo(dims_out.y) && IsAPowerOfTwo(dims_out.z), "Output dimensions must be a power of 2");
+
         fwd_size_change_type = SizeChangeType::no_change;
     }
     else {
@@ -906,103 +872,79 @@ void FourierTransformer<ComputeBaseType, InputType, OtherImageType, Rank>::Valid
         MyFFTRunTimeAssertTrue(false, "Error in validating fwd plan: Currently all dimensions must either increase, decrease or stay the same.");
     }
 
-    // Validate the inverse transform
-    if ( inv_dims_out.x > inv_dims_in.x || inv_dims_out.y > inv_dims_in.y || inv_dims_out.z > inv_dims_in.z ) {
-        // For now we must pad in all dimensions, this is not needed and should be lifted. FIXME
-        MyFFTDebugAssertTrue(inv_dims_out.x >= inv_dims_in.x, "If padding, all dimensions must be >=, x out < x in");
-        MyFFTDebugAssertTrue(inv_dims_out.y >= inv_dims_in.y, "If padding, all dimensions must be >=, y out < y in");
-        MyFFTDebugAssertTrue(inv_dims_out.z >= inv_dims_in.z, "If padding, all dimensions must be >=, z out < z in");
-
-        inv_size_change_type = SizeChangeType::increase;
+    // Validate the FFT sizes the build supports
+    std::array<bool, 6> valid_sizes = {false, false, false, false, false, false};
+    // The signal length can be < the FFT size
+    for ( auto& size : sizes_in_this_build ) {
+        if ( size == dims_in.x || (dims_out.x > dims_in.x) )
+            valid_sizes[0] = true;
+        if ( size == dims_in.y || (dims_out.y > dims_in.y || dims_in.y == 1) )
+            valid_sizes[1] = true;
+        if ( size == dims_in.z || (dims_out.z > dims_in.z || dims_in.z == 1) )
+            valid_sizes[2] = true;
+        if ( size == dims_out.x )
+            valid_sizes[3] = true;
+        if ( size == dims_out.y )
+            valid_sizes[4] = true;
+        if ( size == dims_out.z || dims_out.z == 1 )
+            valid_sizes[5] = true;
     }
-    else if ( inv_dims_out.x < inv_dims_in.x || inv_dims_out.y < inv_dims_in.y || inv_dims_out.z < inv_dims_in.z ) {
-        inv_size_change_type = SizeChangeType::decrease;
-    }
-    else if ( inv_dims_out.x == inv_dims_in.x && inv_dims_out.y == inv_dims_in.y && inv_dims_out.z == inv_dims_in.z ) {
-        inv_size_change_type = SizeChangeType::no_change;
-    }
-    else {
-        // TODO: if this is relaxed, the dimensionality check below will be invalid.
-        MyFFTRunTimeAssertTrue(false, "Error in validating inv plan: Currently all dimensions must either increase, decrease or stay the same.");
-    }
-
-    // check for dimensionality
-    // Note: this is predicated on the else clause ensuring all dimensions behave the same way w.r.t. size change.
-    if ( fwd_dims_in.z == 1 && fwd_dims_out.z == 1 ) {
-        MyFFTRunTimeAssertTrue(inv_dims_in.z == 1 && inv_dims_out.z == 1, "Fwd/Inv dimensionality may not change from 1d,2d,3d (z dimension)");
-        if ( fwd_dims_in.y == 1 && fwd_dims_out.y == 1 ) {
-            MyFFTRunTimeAssertTrue(inv_dims_in.y == 1 && inv_dims_out.y == 1, "Fwd/Inv dimensionality may not change from 1d,2d,3d (y dimension)");
-            transform_dimension = 1;
+    for ( int i = 0; i < 6; i++ ) {
+        if ( is_fwd_not_inv ) {
+            MyFFTRunTimeAssertTrue(valid_sizes[i], "Invalid size fwd");
         }
         else {
-            transform_dimension = 2;
+            MyFFTRunTimeAssertTrue(valid_sizes[i], "Invalid size inv");
         }
     }
-    else {
-        transform_dimension                = 3;
-        constexpr unsigned int max_3d_size = 512;
-        MyFFTRunTimeAssertFalse(fwd_dims_in.z > max_3d_size ||
-                                        fwd_dims_out.z > max_3d_size ||
-                                        inv_dims_in.z > max_3d_size ||
-                                        inv_dims_out.z > max_3d_size ||
-                                        fwd_dims_in.y > max_3d_size ||
-                                        fwd_dims_out.y > max_3d_size ||
-                                        inv_dims_in.y > max_3d_size ||
-                                        inv_dims_out.y > max_3d_size ||
-                                        fwd_dims_in.x > max_3d_size ||
-                                        fwd_dims_out.x > max_3d_size ||
-                                        inv_dims_in.x > max_3d_size ||
-                                        inv_dims_out.x > max_3d_size,
-                                "Error in validating the dimension: Currently all dimensions must be <= 512 for 3d transforms.");
-    }
 
-    // Allow some non-power of 2 sizes if there is a size change type.
-    // For now, just forward increase.
-    // Note: initially we'll only allow this logic for round trip transforms (that don't write out fwd_dims_out or read inv_dims_in) where
-    //       the caller may be "surprised" by the size change.
-    if ( ! IsAPowerOfTwo(fwd_dims_in.x) ) {
-        MyFFTRunTimeAssertTrue(fwd_size_change_type == SizeChangeType::increase, "Input x dimension must be a power of 2");
-        fwd_implicit_dimension_change = true;
-    }
-    if ( ! IsAPowerOfTwo(fwd_dims_in.y) ) {
-        MyFFTRunTimeAssertTrue(fwd_size_change_type == SizeChangeType::increase, "Input y dimension must be a power of 2");
-        fwd_implicit_dimension_change = true;
-    }
-    if ( ! IsAPowerOfTwo(fwd_dims_in.z) ) {
-        MyFFTRunTimeAssertTrue(fwd_size_change_type == SizeChangeType::increase, "Input z dimension must be a power of 2");
-        fwd_implicit_dimension_change = true;
-    }
+    // We can only run this onces both input and output are set
+    if ( is_set_input_params && is_set_output_params ) {
+        MyFFTRunTimeAssertTrue(fwd_dims_out.x == inv_dims_in.x &&
+                                       fwd_dims_out.y == inv_dims_in.y &&
+                                       fwd_dims_out.z == inv_dims_in.z,
+                               "Error in validating the dimension: Currently all fwd out should match inv in.");
 
-    MyFFTRunTimeAssertTrue(IsAPowerOfTwo(fwd_dims_out.x), "fwd Output x dimension must be a power of 2");
-    MyFFTRunTimeAssertTrue(IsAPowerOfTwo(fwd_dims_out.y), "fwd Output y dimension must be a power of 2");
-    MyFFTRunTimeAssertTrue(IsAPowerOfTwo(fwd_dims_out.z), "fwd Output z dimension must be a power of 2");
+        // check for dimensionality
+        // Note: this is predicated on the else clause ensuring all dimensions behave the same way w.r.t. size change.
+        if ( fwd_dims_in.z == 1 || fwd_dims_out.z == 1 || inv_dims_in.z == 1 || inv_dims_out.z == 1 ) {
+            MyFFTRunTimeAssertTrue(fwd_dims_in.z == 1 && fwd_dims_out.z == 1 && inv_dims_in.z == 1 && inv_dims_out.z == 1, "Fwd/Inv dimensionality may not change from 1d,2d,3d (z dimension)");
+            if ( fwd_dims_in.y == 1 || fwd_dims_out.y == 1 || inv_dims_in.y == 1 || inv_dims_out.y == 1 ) {
 
-    MyFFTRunTimeAssertTrue(IsAPowerOfTwo(inv_dims_in.x), "inv Input x dimension must be a power of 2");
-    MyFFTRunTimeAssertTrue(IsAPowerOfTwo(inv_dims_in.y), "inv Input y dimension must be a power of 2");
-    MyFFTRunTimeAssertTrue(IsAPowerOfTwo(inv_dims_in.z), "inv Input z dimension must be a power of 2");
-
-    if ( ! IsAPowerOfTwo(inv_dims_out.x) ) {
-        MyFFTRunTimeAssertTrue(inv_size_change_type == SizeChangeType::decrease, "Output x dimension must be a power of 2");
-        inv_implicit_dimension_change = true;
+                transform_dimension = 1;
+            }
+            else {
+                // We need to enforce square dimensions currently
+                MyFFTRunTimeAssertTrue(fwd_dims_in.y == fwd_dims_in.x && fwd_dims_out.y == fwd_dims_out.x && inv_dims_in.y == inv_dims_in.x && inv_dims_out.y == inv_dims_out.x, "Only square images are supported currently (y dimension)");
+                transform_dimension = 2;
+            }
+        }
+        else {
+            // We need to enforce cubic dimensions currently
+            MyFFTRunTimeAssertTrue(fwd_dims_in.y == fwd_dims_in.x && fwd_dims_out.y == fwd_dims_out.x && fwd_dims_in.z == fwd_dims_in.x && fwd_dims_out.z == fwd_dims_out.x &&
+                                           inv_dims_in.y == inv_dims_in.x && inv_dims_out.y == inv_dims_out.x && inv_dims_in.z == inv_dims_in.x && inv_dims_out.z == inv_dims_out.x,
+                                   "Only cubic images are supported currently (z dimension)");
+            transform_dimension                = 3;
+            constexpr unsigned int max_3d_size = 512;
+            MyFFTRunTimeAssertFalse(fwd_dims_in.z > max_3d_size ||
+                                            fwd_dims_out.z > max_3d_size ||
+                                            inv_dims_in.z > max_3d_size ||
+                                            inv_dims_out.z > max_3d_size ||
+                                            fwd_dims_in.y > max_3d_size ||
+                                            fwd_dims_out.y > max_3d_size ||
+                                            inv_dims_in.y > max_3d_size ||
+                                            inv_dims_out.y > max_3d_size ||
+                                            fwd_dims_in.x > max_3d_size ||
+                                            fwd_dims_out.x > max_3d_size ||
+                                            inv_dims_in.x > max_3d_size ||
+                                            inv_dims_out.x > max_3d_size,
+                                    "Error in validating the dimension: Currently all dimensions must be <= 512 for 3d transforms.");
+        }
     }
-    if ( ! IsAPowerOfTwo(inv_dims_out.y) ) {
-        MyFFTRunTimeAssertTrue(inv_size_change_type == SizeChangeType::decrease, "Output y dimension must be a power of 2");
-        inv_implicit_dimension_change = true;
-    }
-    if ( ! IsAPowerOfTwo(inv_dims_out.z) ) {
-        MyFFTRunTimeAssertTrue(inv_size_change_type == SizeChangeType::decrease, "Output z dimension must be a power of 2");
-        inv_implicit_dimension_change = true;
-    }
-
-    is_size_validated = true;
 }
 
 template <class ComputeBaseType, class InputType, class OtherImageType, int Rank>
 void FourierTransformer<ComputeBaseType, InputType, OtherImageType, Rank>::SetDimensions(DimensionCheckType::Enum check_op_type) {
-    // This should be run inside any public method call to ensure things ar properly setup.
-    if ( ! is_size_validated ) {
-        ValidateDimensions( );
-    }
 
     switch ( check_op_type ) {
         case DimensionCheckType::CopyFromHost: {

@@ -88,6 +88,11 @@ __device__ __forceinline__ unsigned int calc_lane_id( ) {
     return threadIdx.x & replaceme_warpSize_minus1;
 }
 
+__device__ __forceinline__ int
+d_ReturnReal1DAddressFromPhysicalCoord(int3 coords, short4 img_dims) {
+    return ((((int)coords.z * (int)img_dims.y + coords.y) * (int)img_dims.w * 2) + (int)coords.x);
+}
+
 // constexpr bool allow_c2c_cache_sets = false;
 // constexpr bool allow_c2r_cache_sets = false;
 // constexpr bool allow_r2c_cache_sets = false;

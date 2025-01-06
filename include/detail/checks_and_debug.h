@@ -4,6 +4,15 @@
 #include "types.h"
 #include <iostream>
 
+// During testing we may be intenting to capture std::err to see if some particular assert is being triggered
+// if we are, we do not want to abort.
+// #ifdef FastFFT_captureStdErr
+#define FastFFT_useAbort
+
+// #else
+// #define FastFFT_useAbort std::abort( );
+// #endif
+
 namespace FastFFT {
 // hacky and non-conclusive way to trouble shoot mismatched types in function calls
 // Intented to be place ind constexpr conditionals that should not be reached.
@@ -54,15 +63,15 @@ __device__ __host__ inline void static_assert_type_name(T v) {
 
 #else
 // Minimally define asserts that check state variables and setup.
-#define MyFFTDebugAssertTrue(cond, msg, ...) { if ( (cond) != true ) { std::cerr << msg << std::endl << " Failed Assert at " << __FILE__ << ":" << __LINE__ << " " << __PRETTY_FUNCTION__ << std::endl; std::abort(); } }
-#define MyFFTDebugAssertFalse(cond, msg, ...) { if ( (cond) == true ) { std::cerr << msg << std::endl  << " Failed Assert at " << __FILE__ << ":" << __LINE__ << " " << __PRETTY_FUNCTION__ << std::endl;  std::abort(); } }                                                                                                    
+#define MyFFTDebugAssertTrue(cond, msg, ...) { if ( (cond) != true ) { std::cerr << msg << std::endl << " Failed Assert at " << __FILE__ << ":" << __LINE__ << " " << __PRETTY_FUNCTION__ << std::endl; FastFFT_useAbort } }
+#define MyFFTDebugAssertFalse(cond, msg, ...) { if ( (cond) == true ) { std::cerr << msg << std::endl  << " Failed Assert at " << __FILE__ << ":" << __LINE__ << " " << __PRETTY_FUNCTION__ << std::endl;  FastFFT_useAbort } }                                                                                                    
 
 #endif
 
 #if FFT_DEBUG_LEVEL > 1
 // Turn on checkpoints in the testing functions.
-#define MyFFTDebugAssertTestTrue(cond, msg, ...)  { if ( (cond) != true ) { std::cerr << "    Test " << msg << " FAILED!" << std::endl  << "  at " << __FILE__ << ":" << __LINE__ << " " << __PRETTY_FUNCTION__ << std::endl;std::abort(); } else { std::cerr << "    Test " << msg << " passed!" << std::endl; }}
-#define MyFFTDebugAssertTestFalse(cond, msg, ...)  { if ( (cond) == true ) {  std::cerr << "    Test " << msg << " FAILED!" << std::endl   << " at " << __FILE__ << ":" << __LINE__ << " " << __PRETTY_FUNCTION__ << std::endl;   std::abort();  } else {  std::cerr << "    Test " << msg << " passed!" << std::endl;  } }
+#define MyFFTDebugAssertTestTrue(cond, msg, ...)  { if ( (cond) != true ) { std::cerr << "    Test " << msg << " FAILED!" << std::endl  << "  at " << __FILE__ << ":" << __LINE__ << " " << __PRETTY_FUNCTION__ << std::endl;FastFFT_useAbort } else { std::cerr << "    Test " << msg << " passed!" << std::endl; }}
+#define MyFFTDebugAssertTestFalse(cond, msg, ...)  { if ( (cond) == true ) {  std::cerr << "    Test " << msg << " FAILED!" << std::endl   << " at " << __FILE__ << ":" << __LINE__ << " " << __PRETTY_FUNCTION__ << std::endl;   FastFFT_useAbort  } else {  std::cerr << "    Test " << msg << " passed!" << std::endl;  } }
 #define DebugUnused [[maybe_unused]]
 #endif
 
@@ -83,8 +92,8 @@ __device__ __host__ inline void static_assert_type_name(T v) {
 // Always in use
 #define MyFFTPrint(...) { std::cerr << __VA_ARGS__ << std::endl; }
 #define MyFFTPrintWithDetails(...) { std::cerr << __VA_ARGS__ << " From: " << __FILE__ << " " << __LINE__ << " " << __PRETTY_FUNCTION__ << std::endl; }
-#define MyFFTRunTimeAssertTrue(cond, msg, ...) { if ( (cond) != true ) { std::cerr << msg << std::endl << " Failed Assert at " << __FILE__ << ":" << __LINE__ << " " << __PRETTY_FUNCTION__ << std::endl;std::abort(); }  }
-#define MyFFTRunTimeAssertFalse(cond, msg, ...) { if ( (cond) == true ) {std::cerr << msg << std::endl << " Failed Assert at " << __FILE__ << ":" << __LINE__ << " " << __PRETTY_FUNCTION__ << std::endl;std::abort();  } }                                                                                                               
+#define MyFFTRunTimeAssertTrue(cond, msg, ...) { if ( (cond) != true ) { std::cerr << msg << std::endl << " Failed Assert at " << __FILE__ << ":" << __LINE__ << " " << __PRETTY_FUNCTION__ << std::endl;FastFFT_useAbort }  }
+#define MyFFTRunTimeAssertFalse(cond, msg, ...) { if ( (cond) == true ) {std::cerr << msg << std::endl << " Failed Assert at " << __FILE__ << ":" << __LINE__ << " " << __PRETTY_FUNCTION__ << std::endl;FastFFT_useAbort } }                                                                                                               
 
 
 
@@ -94,7 +103,7 @@ __device__ __host__ inline void static_assert_type_name(T v) {
 // If I leave cudaErr blank when HEAVYERRORCHECKING_FFT is not defined, I get some reports/warnings about unused or unreferenced variables. I suspect the performance hit is very small so just leave this on.
 // The real cost is in the synchronization of in pre/postcheck.
 #if FFT_DEBUG_LEVEL == 4
-#define cudaErr(error) { auto status = static_cast<cudaError_t>(error); if ( status != cudaSuccess ) { std::cerr << cudaGetErrorString(status) << " :-> "; MyFFTPrintWithDetails(""); std::abort(); } };
+#define cudaErr(error) { auto status = static_cast<cudaError_t>(error); if ( status != cudaSuccess ) { std::cerr << cudaGetErrorString(status) << " :-> "; MyFFTPrintWithDetails(""); FastFFT_useAbort } };
 #else
 #define cudaErr(error) { auto status = static_cast<cudaError_t>(error); if ( status != cudaSuccess ) { std::cerr << cudaGetErrorString(status) << " :-> "; MyFFTPrintWithDetails(""); } };
 
