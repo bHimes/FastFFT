@@ -6,12 +6,15 @@
 
 // During testing we may be intenting to capture std::err to see if some particular assert is being triggered
 // if we are, we do not want to abort.
-// #ifdef FastFFT_captureStdErr
-#define FastFFT_useAbort
 
-// #else
-// #define FastFFT_useAbort std::abort( );
-// #endif
+// TODO = make configurable so we can run tests/test_run_time_asserts.cu
+// #define FastFFT_captureStdErr
+
+#ifdef FastFFT_captureStdErr
+#define FastFFT_useAbort
+#else
+#define FastFFT_useAbort std::abort( );
+#endif
 
 namespace FastFFT {
 // hacky and non-conclusive way to trouble shoot mismatched types in function calls

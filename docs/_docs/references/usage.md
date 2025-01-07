@@ -20,7 +20,7 @@ In cufft, the first step to library access is to create a "handle" to a plan, *i
     cufftSetStream(cuda_plan_inverse, cudaStreamPerThread);
 
     // The parallel in Fast FFT would be to create an empty FourierTransformer object, e.g.
-    // The template arguments are: ComputeBaseType, InputType, OtherImageType, Rank
+    // The template arguments are: ComputeBaseType, PositionSpaceType, OtherImageType, Rank
     FastFFT::FourierTransformer<float, float, float, 2> FT;
 ```
 

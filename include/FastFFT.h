@@ -18,7 +18,7 @@
 // #define FastFFT_build_sizes 32, 64, 128, 256, 512, 1024, 2048, 4096
 
 // #define FastFFT_build_sizes 16, 4, 32, 8, 64, 8, 128, 8, 256, 8, 512, 8, 1024, 8, 2048, 8, 4096, 16, 8192, 16
-#define FastFFT_build_sizes 512, 4096
+#define FastFFT_build_sizes 64, 128
 
 namespace FastFFT {
 
@@ -88,11 +88,11 @@ struct DevicePointers<float*, __half*, __half2*> {
  * 
  * 
  * @tparam ComputeBaseType - float. Support for ieee half precision is not yet implemented.
- * @tparam InputType - __half or float for real valued input, __half2 or float2 for complex valued input images.
+ * @tparam PositionSpaceType - __half or float for real valued input, __half2 or float2 for complex valued input images.
  * @tparam OtherImageType - __half or float. Actual type depends on position/momentum space representation.
  * @tparam Rank - only 2,3 supported. Support for 3d is partial
  */
-template <class ComputeBaseType = float, class InputType = float, class OtherImageType = float2, int Rank = 2>
+template <class ComputeBaseType = float, class PositionSpaceType = float, class OtherImageType = float2, int Rank = 2>
 class FourierTransformer {
 
   public:
@@ -140,14 +140,14 @@ class FourierTransformer {
         return d_ptr.buffer_1;
     }
 
-    void CopyHostToDeviceAndSynchronize(InputType* input_pointer, int n_elements_to_copy = 0);
-    void CopyHostToDevice(InputType* input_pointer, int n_elements_to_copy = 0);
+    void CopyHostToDeviceAndSynchronize(PositionSpaceType* input_pointer, int n_elements_to_copy = 0);
+    void CopyHostToDevice(PositionSpaceType* input_pointer, int n_elements_to_copy = 0);
 
-    void CopyDeviceToHostAndSynchronize(InputType* input_pointer, int n_elements_to_copy = 0) { CopyAndSynchronize(true, input_pointer, n_elements_to_copy); };
+    void CopyDeviceToHostAndSynchronize(PositionSpaceType* input_pointer, int n_elements_to_copy = 0) { CopyAndSynchronize(true, input_pointer, n_elements_to_copy); };
 
-    void CopyDeviceToDeviceAndSynchronize(InputType* input_pointer, int n_elements_to_copy = 0) { CopyAndSynchronize(false, input_pointer, n_elements_to_copy); };
+    void CopyDeviceToDeviceAndSynchronize(PositionSpaceType* input_pointer, int n_elements_to_copy = 0) { CopyAndSynchronize(false, input_pointer, n_elements_to_copy); };
 
-    void CopyAndSynchronize(bool to_host, InputType* input_pointer, int n_elements_to_copy = 0);
+    void CopyAndSynchronize(bool to_host, PositionSpaceType* input_pointer, int n_elements_to_copy = 0);
 
     // Using the enum directly from python is not something I've figured out yet. Just make simple methods.
     // FIXME: these are not currently used, and perhaps are not needed.
@@ -173,38 +173,39 @@ class FourierTransformer {
     }
 
     // FFT calls
+    // NOTE: if writing or adding to these, transform stage, current buffer and external in/output pointers must be set.
 
-    // TODO: when picking up tomorrow, remove default values for input pointers and move EnableIf to the declarations for the generic functions and instantiate these from fastFFT.cus
+    // TODO: make sure these are all that are accessed from the user end. Re-set private and start encapsulating more thoroughly.
     // Following this
     // Alias for FwdFFT, is there any overhead?
     template <class PreOpType   = std::nullptr_t,
               class IntraOpType = std::nullptr_t>
-    void FwdFFT(InputType*  input_ptr,
-                InputType*  output_ptr = nullptr,
-                PreOpType   pre_op     = nullptr,
-                IntraOpType intra_op   = nullptr);
+    void FwdFFT(PositionSpaceType* input_ptr,
+                PositionSpaceType* output_ptr = nullptr,
+                PreOpType          pre_op     = nullptr,
+                IntraOpType        intra_op   = nullptr);
 
     template <class IntraOpType = std::nullptr_t,
               class PostOpType  = std::nullptr_t>
-    void InvFFT(InputType*  input_ptr,
-                InputType*  output_ptr = nullptr,
-                IntraOpType intra_op   = nullptr,
-                PostOpType  post_op    = nullptr);
+    void InvFFT(PositionSpaceType* input_ptr,
+                PositionSpaceType* output_ptr = nullptr,
+                IntraOpType        intra_op   = nullptr,
+                PostOpType         post_op    = nullptr);
 
     template <class PreOpType   = std::nullptr_t,
               class IntraOpType = std::nullptr_t,
               class PostOpType  = std::nullptr_t>
-    void FwdImageInvFFT(InputType*      input_ptr,
-                        OtherImageType* image_to_search,
-                        InputType*      output_ptr = nullptr,
-                        PreOpType       pre_op     = nullptr,
-                        IntraOpType     intra_op   = nullptr,
-                        PostOpType      post_op    = nullptr);
+    void FwdImageInvFFT(PositionSpaceType* input_ptr,
+                        OtherImageType*    image_to_search,
+                        PositionSpaceType* output_ptr = nullptr,
+                        PreOpType          pre_op     = nullptr,
+                        IntraOpType        intra_op   = nullptr,
+                        PostOpType         post_op    = nullptr);
 
-    void ClipIntoTopLeft(InputType* input_ptr);
-    void ClipIntoReal(InputType*, int wanted_coordinate_of_box_center_x, int wanted_coordinate_of_box_center_y, int wanted_coordinate_of_box_center_z);
+    void ClipIntoTopLeft(PositionSpaceType* input_ptr);
+    void ClipIntoReal(PositionSpaceType*, int wanted_coordinate_of_box_center_x, int wanted_coordinate_of_box_center_y, int wanted_coordinate_of_box_center_z);
 
-    // For all real valued inputs, assumed for any InputType that is not float2 or __half2
+    // For all real valued inputs, assumed for any PositionSpaceType that is not float2 or __half2
 
     int inline ReturnInputMemorySize( ) {
         return input_memory_wanted_;
@@ -234,6 +235,7 @@ class FourierTransformer {
         return inv_dims_out;
     }
 
+    // FIXME: these are convenience functinos for testing and should be moved accordingly
     template <typename T, bool is_on_host = true>
     void SetToConstant(T* input_pointer, int N_values, const T& wanted_value) {
         if ( is_on_host ) {
@@ -275,6 +277,7 @@ class FourierTransformer {
 
     buffer_location current_buffer;
 
+    // FIXME: move to checks and debug
     void PrintState( ) {
         std::cerr << "================================================================" << std::endl;
         std::cerr << "Device Properties: " << std::endl;
@@ -293,7 +296,7 @@ class FourierTransformer {
         std::cerr << "in buffer " << buffer_name[current_buffer] << std::endl;
         std::cerr << "is_fftw_padded_input " << is_fftw_padded_input << std::endl;
         std::cerr << "is_fftw_padded_output " << is_fftw_padded_output << std::endl;
-        std::cerr << "is_real_valued_input " << IsAllowedRealType<InputType> << std::endl;
+        std::cerr << "is_real_valued_input " << IsAllowedRealType<PositionSpaceType> << std::endl;
         std::cerr << "is_set_input_params " << is_set_input_params << std::endl;
         std::cerr << "is_set_output_params " << is_set_output_params << std::endl;
         std::cerr << std::endl;
@@ -344,7 +347,6 @@ class FourierTransformer {
     bool is_set_input_params; // Yes, yes, "are" set.
     bool is_set_output_params;
 
-    int      transform_dimension; // 1,2,3d.
     FFT_Size transform_size;
 
     std::vector<std::string> SizeChangeName{"increase", "decrease", "no_change"};
@@ -379,7 +381,7 @@ class FourierTransformer {
         int           wanted_memory_n_elements             = 0;
         constexpr int scale_compute_base_type_to_full_type = 2;
         // The odd sized block is probably not needed.
-        if constexpr ( IsAllowedRealType<InputType> ) {
+        if constexpr ( IsAllowedRealType<PositionSpaceType> ) {
             if ( wanted_dims.x % 2 == 0 ) {
                 padding_jump_val_        = 2;
                 wanted_memory_n_elements = wanted_dims.x / 2 + 1;
@@ -392,12 +394,12 @@ class FourierTransformer {
             wanted_memory_n_elements *= wanted_dims.y * wanted_dims.z; // other dimensions
             wanted_dims.w = (wanted_dims.x + padding_jump_val_) / 2; // number of complex elements in the X dimesnions after FFT.
         }
-        else if constexpr ( IsAllowedComplexType<InputType> ) {
+        else if constexpr ( IsAllowedComplexType<PositionSpaceType> ) {
             wanted_memory_n_elements = wanted_dims.x * wanted_dims.y * wanted_dims.z;
             wanted_dims.w            = wanted_dims.x; // pitch is constant
         }
         else {
-            constexpr InputType a;
+            constexpr PositionSpaceType a;
             static_assert_type_name(a);
         }
 
@@ -426,7 +428,7 @@ class FourierTransformer {
         PrintVectorType(LP.threadsPerBlock);
         std::cerr << "  Grid dimensions: ";
         PrintVectorType(LP.gridDims);
-        std::cerr << "  Q: " << LP.Q << std::endl;
+        std::cerr << "  Q: " << LP.transform_size.Q << std::endl;
         std::cerr << "  shared input: " << LP.mem_offsets.shared_input << std::endl;
         std::cerr << "  shared output (memlimit in r2c): " << LP.mem_offsets.shared_output << std::endl;
         std::cerr << "  physical_x_input: " << LP.mem_offsets.physical_x_input << std::endl;
@@ -476,10 +478,10 @@ class FourierTransformer {
     std::vector<int> sizes_in_this_build = {FastFFT_build_sizes};
 
     enum KernelType { r2c_none_XY, // 1d fwd  //  2d fwd 1st stage
-                      r2c_none_XZ, // 3d fwd 1st stage
+                      r2c_none_XZ, // 3d fwd 1st stage FIXME: partial coalescing set in LaunchParams
                       r2c_decrease_XY,
                       r2c_increase_XY,
-                      r2c_increase_XZ,
+                      r2c_increase_XZ, // FIXME: partial coalescing set in LaunchParams
                       c2c_fwd_none, // 1d complex valued input, or final stage of Fwd 2d or 3d
                       c2c_fwd_none_XYZ,
                       c2c_fwd_decrease,
@@ -497,7 +499,7 @@ class FourierTransformer {
                       xcorr_fwd_increase_inv_none, //  (e.g. template matching)
                       xcorr_fwd_decrease_inv_none, // (e.g. Fourier cropping)
                       xcorr_fwd_none_inv_decrease, // (e.g. movie/particle translational search)
-                      xcorr_fwd_decrease_inv_decrease, // (e.g. bandlimit, xcorr, translational search)
+                      xcorr_fwd_decrease_inv_decrease, // (e.g. bandlimit, xcorr, translational search) not implemented yet
                       generic_fwd_increase_op_inv_none,
                       COUNT };
 
@@ -585,16 +587,22 @@ class FourierTransformer {
             return false;
     }
 
-    inline bool IsTransormAlongZ(KernelType kernel_type) {
-        if ( KernelName.at(kernel_type).find("_XYZ") != KernelName.at(kernel_type).npos )
+    inline bool Is_XY_Transposed(KernelType kernel_type) {
+        if ( KernelName.at(kernel_type).find("_XY") != KernelName.at(kernel_type).npos )
             return true;
         else
             return false;
     }
 
-    inline bool IsRank3(KernelType kernel_type) {
-        if ( KernelName.at(kernel_type).find("_XZ") != KernelName.at(kernel_type).npos ||
-             KernelName.at(kernel_type).find("_XYZ") != KernelName.at(kernel_type).npos )
+    inline bool Is_XZ_Transposed(KernelType kernel_type) {
+        if ( KernelName.at(kernel_type).find("_XZ") != KernelName.at(kernel_type).npos )
+            return true;
+        else
+            return false;
+    }
+
+    inline bool IsTransormAlongZ(KernelType kernel_type) {
+        if ( KernelName.at(kernel_type).find("_XYZ") != KernelName.at(kernel_type).npos )
             return true;
         else
             return false;
@@ -604,17 +612,19 @@ class FourierTransformer {
     GetTransformSize(KernelType kernel_type);
 
     void         GetTransformSize_thread(KernelType kernel_type, int thread_fft_size);
-    LaunchParams SetLaunchParameters(KernelType kernel_type, const int ept);
+    LaunchParams SetLaunchParameters(KernelType         kernel_type,
+                                     const unsigned int ept,
+                                     const unsigned int stride_y,
+                                     const unsigned int stride_z);
 
     // 1.
     // First call passed from a public transform function, selects block or thread and the transform precision.
     template <int FFT_ALGO_t, class PreOpType = std::nullptr_t, class IntraOpType = std::nullptr_t, class PostOpType = std::nullptr_t>
-    EnableIf<IfAppliesIntraOpFunctor_HasIntraOpFunctor<IntraOpType, FFT_ALGO_t>>
-    SetPrecisionAndExectutionMethod(OtherImageType* other_image_ptr,
-                                    KernelType      kernel_type,
-                                    PreOpType       pre_op_functor   = nullptr,
-                                    IntraOpType     intra_op_functor = nullptr,
-                                    PostOpType      post_op_functor  = nullptr);
+    EnableIf<IfAppliesIntraOpFunctor_HasIntraOpFunctor<IntraOpType, FFT_ALGO_t>> SetPrecisionAndExectutionMethod(OtherImageType* other_image_ptr,
+                                                                                                                 KernelType      kernel_type,
+                                                                                                                 PreOpType       pre_op_functor   = nullptr,
+                                                                                                                 IntraOpType     intra_op_functor = nullptr,
+                                                                                                                 PostOpType      post_op_functor  = nullptr);
 
     // 2. // TODO: remove this now that the functors are working
     // Check to see if any intra kernel functions are wanted, and if so set the appropriate device pointers.
@@ -656,7 +666,7 @@ class FourierTransformer {
     template <class PreOpType,
               class IntraOpType,
               class PostOpType>
-    EnableIf<HasIntraOpFunctor<IntraOpType> && IsAllowedInputType<InputType, OtherImageType>>
+    EnableIf<HasIntraOpFunctor<IntraOpType> && IsAllowedPositionSpaceType<PositionSpaceType, OtherImageType>>
     Generic_Fwd_Image_Inv(OtherImageType* image_to_search,
                           PreOpType       pre_op,
                           IntraOpType     intra_op,
@@ -664,13 +674,13 @@ class FourierTransformer {
 
     template <class PreOpType,
               class IntraOpType>
-    EnableIf<IsAllowedInputType<InputType>>
+    EnableIf<IsAllowedPositionSpaceType<PositionSpaceType>>
     Generic_Fwd(PreOpType   pre_op,
                 IntraOpType intra_op);
 
     template <class IntraOpType,
               class PostOpType>
-    EnableIf<IsAllowedInputType<InputType>>
+    EnableIf<IsAllowedPositionSpaceType<PositionSpaceType>>
     Generic_Inv(IntraOpType intra_op,
                 PostOpType  post_op);
 
@@ -700,14 +710,13 @@ class FourierTransformer {
         // The size we would need to use with a general purpose library, eg. FFTW
         // Note: this is not limited by the power of 2 restriction as we can compose this with sub ffts that are power of 2
         transform_size.N = full_size_transform;
-        // The input/output size we care about. non-zero comes from zero padding, but probably doesn't make sense
+        // The input/output SignalLength we care about. non-zero comes from zero padding, but probably doesn't make sense
         // for a size reduction algo e.g. TODO: rename
         transform_size.L = number_non_zero_inputs_or_outputs;
 
         // Get the closest >= power of 2
-        transform_size.P = 1;
-        while ( transform_size.P < number_non_zero_inputs_or_outputs )
-            transform_size.P = transform_size.P << 1;
+        transform_size.P = GetNextPowerOfTwo(number_non_zero_inputs_or_outputs);
+        // FIXME: debug assert, but we need to define max size somewhere else
 
         MyFFTDebugAssertFalse(transform_size.P > transform_size.N, "transform_size.P > tranform_size.N");
 
@@ -715,15 +724,13 @@ class FourierTransformer {
         MyFFTDebugAssertTrue(transform_size.N % transform_size.P == 0, "transform_size.N % tranform_size.P != 0");
         transform_size.Q = transform_size.N / transform_size.P;
 
-        // FIXME: there is a bug in cuda that crashes for thread block size > 64 in the Z dimension.
-        // Note: for size increase or rount trip transforms, we can use on chip explicit padding, so this bug
-        // does not apply.
+        // FIXME: thread block size > 64 in the Z dimension is not allowed in CUDA
         // if ( IsDecreaseSizeType(kernel_type) )
         //     MyFFTRunTimeAssertFalse(transform_size.Q > 64, "transform_size.Q > 64, see Nvidia bug report 4417253");
     }
 
-    // Input is real or complex inferred from InputType
-    DevicePointers<ComputeBaseType*, InputType*, OtherImageType*> d_ptr;
+    // Input is real or complex inferred from PositionSpaceType
+    DevicePointers<ComputeBaseType*, PositionSpaceType*, OtherImageType*> d_ptr;
     // Check to make sure we haven't fouled up the explicit instantiation of DevicePointers
 
 }; // class Fourier Transformer

@@ -105,7 +105,7 @@ FastFFT::PrintState()
     std::cout << "is_in_buffer_memory " << is_in_buffer_memory << std::endl;
     std::cout << "is_fftw_padded_input " << is_fftw_padded_input << std::endl;
     std::cout << "is_fftw_padded_output " << is_fftw_padded_output << std::endl;
-    std::cout << "is_real_valued_input " << IsAllowedRealType<InputType>  << std::endl;
+    std::cout << "is_real_valued_input " << IsAllowedRealType<PositionSpaceType>  << std::endl;
     std::cout << "is_set_input_params " << is_set_input_params << std::endl;
     std::cout << "is_set_output_params " << is_set_output_params << std::endl;
     std::cout << std::endl;
@@ -145,7 +145,7 @@ FastFFT::PrintLaunchParameters()
     PrintVectorType(LP.threadsPerBlock);
     std::cout << "  Grid dimensions: ";
     PrintVectorType(LP.gridDims);
-    std::cout << "  Q: " << LP.Q << std::endl;
+    std::cout << "  Q: " << LP.transform_size.Q << std::endl;
     std::cout << "  shared input: " << LP.mem_offsets.shared_input << std::endl;
     std::cout << "  shared output (memlimit in r2c): " << LP.mem_offsets.shared_output << std::endl;
     std::cout << "  physical_x_input: " << LP.mem_offsets.physical_x_input << std::endl;

@@ -116,10 +116,10 @@ void compare_libraries(std::vector<int> size, FastFFT::SizeChangeType::Enum size
             FT.SetToConstant(FT_output.real_values, FT_output.real_memory_allocated, 0.0f);
 
             // Place these values at the origin of the image and after convolution, should be at 0,0,0.
-            float divide_by = FFT_DEBUG_STAGE == 0 ? 1.f : FFT_DEBUG_STAGE < 4 ? sqrtf(16.f)
-                                                   : FFT_DEBUG_STAGE == 4      ? sqrtf(16.f * 16.f)
-                                                   : FFT_DEBUG_STAGE < 7       ? sqrtf(16.f * 16.f * 16.f)
-                                                                               : 32. * 32.;
+            float divide_by = FFT_DEBUG_STAGE == 0 ? 1.f : FFT_DEBUG_STAGE < 4 ? sqrtf(powf(size[oSize], 1))
+                                                   : FFT_DEBUG_STAGE == 4      ? sqrtf(powf(size[oSize], 2))
+                                                   : FFT_DEBUG_STAGE < 7       ? sqrtf(powf(size[oSize], 3))
+                                                                               : sqrtf(powf(size[oSize], 4));
 
             float counter       = 0.f;
             int   pixel_counter = 0;
@@ -129,7 +129,7 @@ void compare_libraries(std::vector<int> size, FastFFT::SizeChangeType::Enum size
                     counter += 1.f;
                     pixel_counter++;
                 }
-                pixel_counter += FT_input.padding_jump_value;
+                pixel_counter += (FT_input.padding_jump_value + input_size.x - 16);
             }
 
             // Transform the target on the host prior to transfer.

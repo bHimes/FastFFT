@@ -1,7 +1,10 @@
-#define FastFFT_captureStdErr
+
 
 #include <sstream>
 #include "../../include/FastFFT.h"
+
+// FastFFT_captureStdErr must be defined so that the asserts do not call std::abort
+// It is not clear yet how useful or not this is to check that runtime asserts are working, vs. hope and pray
 
 struct FastFFTCaptureStdErr {
     // This can be an ofstream as well or any other ostream
@@ -42,6 +45,11 @@ struct FastFFTCaptureStdErr {
 };
 
 int main(int argc, char** argv) {
+
+#ifndef FastFFT_captureStdErr
+    std::cout << "Error: FastFFT_captureStdErr must be defined when running this test." << std::endl;
+    return 1;
+#endif
 
     const int input_size = 64;
 

@@ -66,7 +66,7 @@ template <typename... Args>
 constexpr bool IsAllowedComplexType = (... && (std::is_same_v<Args, __half2> || std::is_same_v<Args, float2>));
 
 template <typename... Args>
-constexpr bool IsAllowedInputType = (... && (std::is_same_v<Args, __half> || std::is_same_v<Args, float> || std::is_same_v<Args, __half2> || std::is_same_v<Args, float2>));
+constexpr bool IsAllowedPositionSpaceType = (... && (std::is_same_v<Args, __half> || std::is_same_v<Args, float> || std::is_same_v<Args, __half2> || std::is_same_v<Args, float2>));
 
 template <typename T1_wanted, typename T2_wanted, typename T1, typename T2>
 constexpr bool CheckPointerTypesForMatch = (std::is_same_v<T1_wanted, T1> && std::is_same_v<T2_wanted, T2>);

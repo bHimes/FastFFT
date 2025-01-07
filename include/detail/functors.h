@@ -59,7 +59,7 @@ struct my_functor<T, 4, IKF_t::CONJ_MUL_THEN_SCALE, EnableIf<IsAllowedRealType<T
 };
 
 template <typename T>
-struct my_functor<T, 2, IKF_t::SCALE, EnableIf<IsAllowedInputType<T>>> final {
+struct my_functor<T, 2, IKF_t::SCALE, EnableIf<IsAllowedPositionSpaceType<T>>> final {
 
     const T scale_factor;
 

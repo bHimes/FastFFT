@@ -5,8 +5,8 @@
 #define __INCLUDE_FAST_FFT_CUH__
 
 // #define USE_FOLDED_R2C_C2R
-#define USE_FOLDED_C2R
-#define C2R_BUFFER_LINES
+// #define USE_FOLDED_C2R
+// #define C2R_BUFFER_LINES
 
 // cudaErr(cudaFuncSetSharedMemConfig((const void*)block_fft_kernel_C2R_DECREASE_XY<FFT, data_buffer_t, data_io_t>, cudaSharedMemBankSizeEightByte));
 
@@ -77,7 +77,8 @@ __launch_bounds__(FFT::max_threads_per_block) __global__
                                               OutputData_t* __restrict__ output_values,
                                               Offsets                      mem_offsets,
                                               float                        twiddle_in,
-                                              int                          Q,
+                                              const int                    Q,
+                                              const int                    SignalLength,
                                               typename FFT::workspace_type workspace);
 
 // XZ_STRIDE ffts/block via threadIdx.x, notice launch bounds. Creates partial coalescing.
@@ -110,6 +111,7 @@ __launch_bounds__(FFT::max_threads_per_block) __global__
                                            Offsets                      mem_offsets,
                                            float                        twiddle_in,
                                            int                          Q,
+                                           const unsigned int           SignalLength,
                                            typename FFT::workspace_type workspace);
 
 // __launch_bounds__(FFT::max_threads_per_block)  we don't know this because it is threadDim.x * threadDim.z - this could be templated if it affects performance significantly
@@ -210,19 +212,19 @@ __global__ void block_fft_kernel_C2R_DECREASE_XY(const InputData_t* __restrict__
                                                  int                          Q,
                                                  typename FFT::workspace_type workspace);
 
-template <class InputType, class OutputBaseType>
-__global__ void clip_into_top_left_kernel(InputType*      input_values,
-                                          OutputBaseType* output_values,
-                                          const short4    dims);
+template <class PositionSpaceType, class OutputBaseType>
+__global__ void clip_into_top_left_kernel(PositionSpaceType* input_values,
+                                          OutputBaseType*    output_values,
+                                          const short4       dims);
 
 // Modified from GpuImage::ClipIntoRealKernel
-template <typename InputType, typename OutputBaseType>
-__global__ void clip_into_real_kernel(InputType*      real_values_gpu,
-                                      OutputBaseType* other_image_real_values_gpu,
-                                      short4          dims,
-                                      short4          other_dims,
-                                      int3            wanted_coordinate_of_box_center,
-                                      OutputBaseType  wanted_padding_value);
+template <typename PositionSpaceType, typename OutputBaseType>
+__global__ void clip_into_real_kernel(PositionSpaceType* real_values_gpu,
+                                      OutputBaseType*    other_image_real_values_gpu,
+                                      short4             dims,
+                                      short4             other_dims,
+                                      int3               wanted_coordinate_of_box_center,
+                                      OutputBaseType     wanted_padding_value);
 
 template <unsigned int hint_type, typename T>
 __device__ __forceinline__ T load_with_hint(const T* ptr, const int idx) {
@@ -618,13 +620,17 @@ struct io {
                                               complex_compute_t* __restrict__ shared_input,
                                               complex_compute_t* __restrict__ thread_data,
                                               float* __restrict__ twiddle_factor_args,
-                                              float twiddle_in) {
+                                              float              twiddle_in,
+                                              const unsigned int SignalLength) {
 
         unsigned int index = threadIdx.x;
         for ( unsigned int i = 0; i < FFT::elements_per_thread; i++ ) {
             twiddle_factor_args[i] = twiddle_in * index;
-            thread_data[i]         = convert_if_needed<FFT, complex_compute_t>(input, index);
-            shared_input[index]    = thread_data[i];
+            if ( index < SignalLength )
+                thread_data[i] = convert_if_needed<FFT, complex_compute_t>(input, index);
+            else
+                thread_data[i] = complex_compute_t{0, 0};
+            shared_input[index] = thread_data[i];
             index += FFT::stride;
         }
     }
@@ -666,16 +672,23 @@ struct io {
                                                   float twiddle_in,
                                                   int* __restrict__ input_map,
                                                   int* __restrict__ output_map,
-                                                  int Q) {
+                                                  int Q,
+                                                  int SignalLength) {
 
         unsigned int index = threadIdx.x;
         for ( unsigned int i = 0; i < FFT::elements_per_thread; i++ ) {
-            // if (blockIdx.y == 0) ("blck %i index %i \n", Q*index, index);
+
             input_map[i]           = index;
             output_map[i]          = Q * index;
             twiddle_factor_args[i] = twiddle_in * index;
-            thread_data[i]         = convert_if_needed<FFT, complex_compute_t>(input, index);
-            shared_input[index]    = thread_data[i].x;
+            if ( index < SignalLength ) {
+                thread_data[i] = convert_if_needed<FFT, complex_compute_t>(input, index);
+            }
+            else {
+                thread_data[i] = complex_compute_t{0, 0};
+            }
+            shared_input[index] = thread_data[i].x;
+
             index += FFT::stride;
         }
     }
@@ -688,13 +701,17 @@ struct io {
                                                   scalar_compute_t* __restrict__ shared_input,
                                                   complex_compute_t* __restrict__ thread_data,
                                                   float* __restrict__ twiddle_factor_args,
-                                                  float twiddle_in) {
+                                                  float     twiddle_in,
+                                                  const int SignalLength) {
 
         unsigned int index = threadIdx.x;
         for ( unsigned int i = 0; i < FFT::elements_per_thread; i++ ) {
             twiddle_factor_args[i] = twiddle_in * index;
-            thread_data[i]         = convert_if_needed<FFT, complex_compute_t>(input, index);
-            shared_input[index]    = thread_data[i].x;
+            if ( index < SignalLength )
+                thread_data[i] = convert_if_needed<FFT, complex_compute_t>(input, index);
+            else
+                thread_data[i] = complex_compute_t{0, 0};
+            shared_input[index] = thread_data[i].x;
             index += FFT::stride;
         }
     }
