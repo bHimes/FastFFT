@@ -189,7 +189,7 @@ int main(int argc, char** argv) {
         std::cout << "This doesn't make sense as the synchronizations are invalidating.\n";
 // exit(1);
 #endif
-        std::vector<int> size = {64, 128};
+        std::vector<int> size = {60, 128};
 
         SCT size_change_type;
         // Set the SCT to no_change, increase, or decrease

@@ -1453,7 +1453,7 @@ __global__ void block_fft_kernel_C2C_INCREASE(const ComplexData_t* __restrict__ 
     complex_compute_t twiddle;
 
     // No need to __syncthreads as each thread only accesses its own shared mem anyway
-    io<FFT>::load_shared(&input_values[Return1DFFTAddress(size_of<FFT>::value)],
+    io<FFT>::load_shared(&input_values[Return1DFFTAddress(mem_offsets.physical_x_input)],
                          shared_input_complex,
                          thread_data,
                          twiddle_factor_args,
@@ -1480,7 +1480,9 @@ __global__ void block_fft_kernel_C2C_INCREASE(const ComplexData_t* __restrict__ 
     // Now that the memory output can be coalesced send to global
     // FIXME: is this actually coalced?
     for ( int sub_fft = 0; sub_fft < Q; sub_fft++ ) {
-        io<FFT>::store_coalesced(shared_output, &output_values[Return1DFFTAddress(size_of<FFT>::value * Q)], sub_fft * mem_offsets.shared_input);
+        io<FFT>::store_coalesced(shared_output,
+                                 &output_values[Return1DFFTAddress(mem_offsets.physical_x_output)],
+                                 sub_fft * mem_offsets.shared_input); // FIXME: if we shrink shared_input == SignalLength then this should be size_of<FFT>::value
     }
 }
 
@@ -3080,6 +3082,7 @@ LaunchParams FourierTransformer<ComputeBaseType, PositionSpaceType, OtherImageTy
             L.mem_offsets.physical_x_output = fwd_dims_out.w;
         }
     }
+
     else if ( IsC2RType(kernel_type) ) {
         // This is always the last op, so if there is a size change, it will have happened once on C2C, reducing the number of blocks
         if constexpr ( Rank == 2 ) {
