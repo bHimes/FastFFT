@@ -5,7 +5,7 @@
 #define __INCLUDE_FAST_FFT_CUH__
 
 // #define USE_FOLDED_R2C_C2R
-// #define USE_FOLDED_C2R
+#define USE_FOLDED_C2R
 // #define C2R_BUFFER_LINES
 
 // cudaErr(cudaFuncSetSharedMemConfig((const void*)block_fft_kernel_C2R_DECREASE_XY<FFT, data_buffer_t, data_io_t>, cudaSharedMemBankSizeEightByte));
@@ -672,8 +672,8 @@ struct io {
                                                   float twiddle_in,
                                                   int* __restrict__ input_map,
                                                   int* __restrict__ output_map,
-                                                  int Q,
-                                                  int SignalLength) {
+                                                  int          Q,
+                                                  unsigned int SignalLength) {
 
         unsigned int index = threadIdx.x;
         for ( unsigned int i = 0; i < FFT::elements_per_thread; i++ ) {
@@ -1014,28 +1014,6 @@ struct io {
         if ( threadIdx.x == 0 ) {
             output[Return1DFFTAddress_transpose_XY(output_MAP[FFT::elements_per_thread / 2], pixel_pitch)] = convert_if_needed<FFT, data_io_t>(thread_data, FFT::elements_per_thread / 2);
         }
-    }
-
-    template <typename data_io_t>
-    static inline __device__ void store_r2c_transposed_xy(const complex_compute_t* __restrict__ thread_data,
-                                                          data_io_t* __restrict__ output,
-                                                          int* __restrict__ output_MAP,
-                                                          int pixel_pitch,
-                                                          int memory_limit) {
-
-        for ( unsigned int i = 0; i <= FFT::elements_per_thread / 2; i++ ) {
-            // output map is thread local, so output_MAP[i] gives the x-index in the non-transposed array and blockIdx.y gives the y-index
-            // if (blockIdx.y == 1) printf("index, pitch, blcok, address %i, %i, %i, %i\n", output_MAP[i], pixel_pitch, memory_limit, output_MAP[i]*pixel_pitch + blockIdx.y);
-
-            if ( output_MAP[i] < memory_limit )
-                output[Return1DFFTAddress_transpose_XY(output_MAP[i], pixel_pitch)] = convert_if_needed<FFT, data_io_t>(thread_data, i);
-            // if (blockIdx.y == 32) printf("from store transposed %i , val %f %f\n", output_MAP[i], thread_data[i].x, thread_data[i].y);
-        }
-        // if (threadIdx.x  == 0)
-        // {
-        //   printf("index, pitch, blcok, address %i, %i, %i, %i\n", output_MAP[FFT::elements_per_thread / 2], pixel_pitch, blockIdx.y, output_MAP[FFT::elements_per_thread / 2]*pixel_pitch + blockIdx.y);
-        //   if (output_MAP[FFT::elements_per_thread / 2] < memory_limit) output[output_MAP[FFT::elements_per_thread / 2]*pixel_pitch + blockIdx.y] =  thread_data[FFT::elements_per_thread / 2];
-        // }
     }
 
     template <typename data_io_t>

@@ -207,6 +207,7 @@ void FourierTransformer<ComputeBaseType, PositionSpaceType, OtherImageType, Rank
 
     // ReturnPaddedMemorySize also sets FFTW padding etc.
     input_memory_wanted_ = ReturnPaddedMemorySize(fwd_dims_in);
+
     // sets .w and also increases compute_memory_wanted_ if needed.
     fwd_output_memory_wanted_ = ReturnPaddedMemorySize(fwd_dims_out);
 
@@ -1043,7 +1044,9 @@ __launch_bounds__(FFT::max_threads_per_block) __global__
     // In the first FFT the modifying twiddle factor is 1 so the data are real
     FFT( ).execute(thread_data, shared_mem, workspace);
 
-    io<FFT>::store_r2c_transposed_xy(thread_data, &output_values[ReturnZplane(gridDim.y, mem_offsets.physical_x_output)], gridDim.y);
+    io<FFT>::store_r2c_transposed_xy(thread_data,
+                                     &output_values[ReturnZplane(gridDim.y, mem_offsets.physical_x_output)],
+                                     gridDim.y);
 }
 
 // 2 ffts/block via threadIdx.x, notice launch bounds. Creates partial coalescing.
@@ -1158,8 +1161,7 @@ __launch_bounds__(FFT::max_threads_per_block) __global__
     io<FFT>::store_r2c_transposed_xy(thread_data,
                                      &output_values[ReturnZplane(blockDim.y, mem_offsets.physical_x_output)],
                                      output_MAP,
-                                     gridDim.y,
-                                     mem_offsets.physical_x_output);
+                                     gridDim.y);
 }
 
 template <class FFT, class InputData_t, class OutputData_t>
@@ -2610,13 +2612,6 @@ void FourierTransformer<ComputeBaseType, PositionSpaceType, OtherImageType, Rank
                     std::cerr << "n_buffer_lines " << n_buffer_lines << std::endl;
 
                     CheckSharedMemory(shared_memory, device_properties);
-
-                    // PrintLaunchParameters(LP);
-                    // PrintState( );
-                    // std::cerr << "smem " << shared_memory << std::endl;
-                    // std::cerr << "FFT::shared_memory_size " << FFT::shared_memory_size << std::endl;
-                    // std::cerr << "max tpb " << max_threads_per_block << " n_buffer " << n_buffer_lines << std::endl;
-                    // exit(0);
 
 #if FFT_DEBUG_STAGE > 6
                     // cudaErr(cudaFuncSetCacheConfig((void*)block_fft_kernel_C2R_NONE_XY<FFT, max_threads_per_block, data_buffer_t, data_io_t, n_buffer_lines>, cudaFuncCachePreferShared));
