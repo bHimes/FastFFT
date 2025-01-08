@@ -1607,9 +1607,10 @@ __launch_bounds__(MAX_TPB) __global__
                                                                 shared_mem,
                                                                 gridDim.y * n_ffts);
 
+
         // To cut down on total smem needed split these
         // FFT( ).execute(thread_data, &shared_mem[FFT::shared_memory_size / sizeof(complex_compute_t) * threadIdx.y], workspace);
-
+        // FIXME: the reduction by 2 is also used at the kernel call site and shoulid be set somehwere once.
         const unsigned int eve_odd = threadIdx.y % 2;
         if ( eve_odd == 0 ) {
             FFT( ).execute(thread_data, &shared_mem[FFT::shared_memory_size / sizeof(complex_compute_t) * (threadIdx.y / 2)], workspace);
