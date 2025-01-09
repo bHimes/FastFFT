@@ -27,6 +27,16 @@
 // rather than saying extern __shared__ __align__(16) value_type shared_mem[]; we define the following instead.
 #define FastFFT_SMEM extern __shared__ __align__(16)
 
+// clang-format off
+#define FastFFT_PRINT_DUMP(LP) \
+    std::cerr << "\nFastFFT Debug Dump\n"; \
+    PrintState(); \
+    PrintLaunchParameters(LP); \
+    std::cerr << "Smem :" << shared_memory << std::endl; \
+    std::cerr << "Ept: " << FFT::elements_per_thread << std::endl; \
+    std::cerr << "Shared memory size: " << FFT::shared_memory_size << std::endl;
+
+// clang-format on
 namespace FastFFT {
 
 // If we are using the suggested ept we need to scale some down that otherwise requiest too many registers as cufftdx is unaware of the higher order transforms.
@@ -68,7 +78,7 @@ __launch_bounds__(FFT::max_threads_per_block) __global__
         void block_fft_kernel_C2C_FWD_INCREASE_OP_INV_NONE(const ExternalImage_t* __restrict__ image_to_search,
                                                            const ComplexData_t* __restrict__ input_values,
                                                            ComplexData_t* __restrict__ output_values,
-                                                           Offsets mem_offsets, int apparent_Q,
+                                                           Offsets                         mem_offsets,
                                                            typename FFT::workspace_type    workspace_fwd,
                                                            typename invFFT::workspace_type workspace_inv,
                                                            PreOpType                       pre_op_functor,
@@ -79,33 +89,34 @@ __launch_bounds__(FFT::max_threads_per_block) __global__
     using complex_compute_t = typename FFT::value_type;
     using scalar_compute_t  = typename complex_compute_t::value_type;
 
-    // __shared__ complex_compute_t shared_mem[invFFT::shared_memory_size/sizeof(complex_compute_t)]; // Storage for the input data that is re-used each blcok
-    FastFFT_SMEM complex_compute_t shared_mem[]; // Storage for the input data that is re-used each blcok
+    FastFFT_SMEM complex_compute_t shared_mem[];
 
     complex_compute_t thread_data[FFT::storage_size];
 
-    // For simplicity, we explicitly zeropad the input data to the size of the FFT.
-    // It may be worth trying to use threadIdx.y as in the DECREASE methods.
-    // Until then, this
-
-    io<FFT>::load(&input_values[Return1DFFTAddress(size_of<FFT>::value / apparent_Q)], thread_data, size_of<FFT>::value / apparent_Q, pre_op_functor);
+    // All threads must participate in the FFT due to shared memory fences, so there
+    // is no way to merge kernels w/ different sized FFTs, so we are forced to explicitly
+    // zero-pad the input on the forward.
+    io<FFT>::load(&input_values[Return1DFFTAddress(mem_offsets.physical_x_input)],
+                  thread_data,
+                  mem_offsets.physical_x_input,
+                  pre_op_functor);
 
     // In the first FFT the modifying twiddle factor is 1 so the data are reeal
     FFT( ).execute(thread_data, shared_mem, workspace_fwd);
 
 #if FFT_DEBUG_STAGE > 3
     //  * apparent_Q
-    io<invFFT>::load_shared(&image_to_search[Return1DFFTAddress(size_of<FFT>::value)],
-                            thread_data,
-                            intra_op_functor);
+    io<invFFT>::load_external_data(&image_to_search[Return1DFFTAddress(size_of<invFFT>::value)],
+                                   thread_data,
+                                   intra_op_functor);
 #endif
 
 #if FFT_DEBUG_STAGE > 4
     invFFT( ).execute(thread_data, shared_mem, workspace_inv);
-    io<invFFT>::store(thread_data, &output_values[Return1DFFTAddress(size_of<FFT>::value)], post_op_functor);
+    io<invFFT>::store(thread_data, &output_values[Return1DFFTAddress(size_of<invFFT>::value)], post_op_functor);
 #else
     // Do not do the post op lambda if the invFFT is not used.
-    io<invFFT>::store(thread_data, &output_values[Return1DFFTAddress(size_of<FFT>::value)]);
+    io<invFFT>::store(thread_data, &output_values[Return1DFFTAddress(size_of<invFFT>::value)]);
 #endif
 }
 
@@ -1607,19 +1618,18 @@ __launch_bounds__(MAX_TPB) __global__
                                                                 shared_mem,
                                                                 gridDim.y * n_ffts);
 
-
+        FFT( ).execute(thread_data, &shared_mem[FFT::shared_memory_size / sizeof(complex_compute_t) * threadIdx.y], workspace);
         // To cut down on total smem needed split these
-        // FFT( ).execute(thread_data, &shared_mem[FFT::shared_memory_size / sizeof(complex_compute_t) * threadIdx.y], workspace);
-        // FIXME: the reduction by 2 is also used at the kernel call site and shoulid be set somehwere once.
-        const unsigned int eve_odd = threadIdx.y % 2;
-        if ( eve_odd == 0 ) {
-            FFT( ).execute(thread_data, &shared_mem[FFT::shared_memory_size / sizeof(complex_compute_t) * (threadIdx.y / 2)], workspace);
-        }
-        __syncthreads( );
-        if ( eve_odd == 1 ) {
-            FFT( ).execute(thread_data, &shared_mem[FFT::shared_memory_size / sizeof(complex_compute_t) * (threadIdx.y / 2)], workspace);
-        }
-        __syncthreads( );
+        // FIXME: I don't think there is any way to get this to work, b/c the FFT().exectute method inserts barrier.sync ptx, which afaik behave the same as __syncthreads
+        // const unsigned int eve_odd = threadIdx.y % 2;
+        // if ( eve_odd == 0 ) {
+        //     FFT( ).execute(thread_data, &shared_mem[FFT::shared_memory_size / sizeof(complex_compute_t) * (threadIdx.y / 2)], workspace);
+        // }
+        // __syncthreads( );
+        // if ( eve_odd == 1 ) {
+        //     FFT( ).execute(thread_data, &shared_mem[FFT::shared_memory_size / sizeof(complex_compute_t) * (threadIdx.y / 2)], workspace);
+        // }
+        // __syncthreads( );
 
 #else
         static_assert(n_ffts == 1, "C2R_BUFFER_LINES must be enabled, should not get hereonly for n_ffts == 1");
@@ -2056,11 +2066,6 @@ void FourierTransformer<ComputeBaseType, PositionSpaceType, OtherImageType, Rank
 
                     int shared_memory = LP.mem_offsets.shared_input * sizeof(scalar_compute_t) + FFT::shared_memory_size;
 
-                    std::cerr << "Shared Mem from r2c_increase_XY " << shared_memory << std::endl; // revert
-
-                    PrintLaunchParameters(LP);
-                    PrintState( );
-
                     CheckSharedMemory(shared_memory, device_properties);
 #if FFT_DEBUG_STAGE > 0
                     cudaErr(cudaFuncSetAttribute((void*)block_fft_kernel_R2C_INCREASE_XY<FFT, data_io_t, data_buffer_t>, cudaFuncAttributeMaxDynamicSharedMemorySize, shared_memory));
@@ -2305,9 +2310,6 @@ void FourierTransformer<ComputeBaseType, PositionSpaceType, OtherImageType, Rank
                     cudaError_t error_code    = cudaSuccess;
                     auto        workspace     = make_workspace<FFT>(error_code);
                     int         shared_memory = FFT::shared_memory_size + (unsigned int)sizeof(complex_compute_t) * (LP.mem_offsets.shared_input + LP.mem_offsets.shared_output);
-                    std::cerr << "\n\nShared Mem from c2c fwd increase " << shared_memory << std::endl; // revert
-                    PrintLaunchParameters(LP);
-                    PrintState( );
 #if FFT_DEBUG_STAGE > 2
                     CheckSharedMemory(shared_memory, device_properties);
                     cudaErr(cudaFuncSetAttribute((void*)block_fft_kernel_C2C_INCREASE<FFT, data_buffer_t>, cudaFuncAttributeMaxDynamicSharedMemorySize, shared_memory));
@@ -2366,9 +2368,6 @@ void FourierTransformer<ComputeBaseType, PositionSpaceType, OtherImageType, Rank
                     auto        workspace  = make_workspace<FFT>(error_code);
 
                     int shared_memory = FFT::shared_memory_size;
-                    std::cerr << "\n\nShared Mem from c2c_inv_none " << shared_memory << std::endl; // revert
-                    PrintLaunchParameters(LP);
-                    PrintState( );
                     CheckSharedMemory(shared_memory, device_properties);
 #if FFT_DEBUG_STAGE > 4
                     cudaErr(cudaFuncSetAttribute((void*)block_fft_kernel_C2C_NONE<FFT, data_buffer_t>, cudaFuncAttributeMaxDynamicSharedMemorySize, shared_memory));
@@ -2595,8 +2594,11 @@ void FourierTransformer<ComputeBaseType, PositionSpaceType, OtherImageType, Rank
                     constexpr unsigned int max_threads_per_block = FFT::max_threads_per_block * n_buffer_lines;
                     static_assert(max_threads_per_block < 1025, "C2R_BUFFER_LINES resulting in too many threads per block.");
 
-                    // Add enough shared mem to swap on each read // revert
-                    shared_memory = std::max(size_t(FFT::shared_memory_size * n_buffer_lines / 2), size_t(FFT::stride * n_buffer_lines * sizeof(complex_compute_t)));
+                    // Add enough shared mem to swap on each read
+                    // FIXME: I don't think there is any way to get this to work, b/c the FFT().exectute method inserts barrier.sync ptx, which afaik behave the same as __syncthreads
+                    // So we can't have some threads wait their turn to do the FFT because they will never reach the sync point.
+                    // shared_memory = std::max(size_t(FFT::shared_memory_size * n_buffer_lines / 2), size_t(FFT::stride * n_buffer_lines * sizeof(complex_compute_t)));
+                    shared_memory = std::max(size_t(FFT::shared_memory_size * n_buffer_lines), size_t(FFT::stride * n_buffer_lines * sizeof(complex_compute_t)));
 
 #else
 
@@ -2605,12 +2607,6 @@ void FourierTransformer<ComputeBaseType, PositionSpaceType, OtherImageType, Rank
 #endif
 
                     const LaunchParams LP = SetLaunchParameters(c2r_none_XY, FFT::elements_per_thread, n_buffer_lines, 1);
-
-                    std::cerr << "Shared Mem from c2r_none XY " << shared_memory << std::endl; // revert
-
-                    PrintLaunchParameters(LP);
-                    PrintState( );
-                    std::cerr << "n_buffer_lines " << n_buffer_lines << std::endl;
 
                     CheckSharedMemory(shared_memory, device_properties);
 
@@ -2803,6 +2799,7 @@ void FourierTransformer<ComputeBaseType, PositionSpaceType, OtherImageType, Rank
 
                 break;
             }
+
             case generic_fwd_increase_op_inv_none: {
                 if constexpr ( FFT_ALGO_t == Generic_Fwd_Image_Inv_FFT ) {
                     // revert : with 16 ept this method uses 128 reg/thread which limits to 2 blocks /sm, testing 8
@@ -2828,6 +2825,7 @@ void FourierTransformer<ComputeBaseType, PositionSpaceType, OtherImageType, Rank
                     if constexpr ( IS_IKF_t<IntraOpType>( ) ) {
 // FIXME
 #if FFT_DEBUG_STAGE > 2
+
                         // Right now, because of the n_threads == size_of<FFT> requirement, we are explicitly zero padding, so we need to send an "apparent Q" to know the input size.
                         // Could send the actual size, but later when converting to use the transform decomp with different sized FFTs this will be a more direct conversion.
                         int apparent_Q = size_of<FFT>::value / fwd_dims_in.y;
@@ -2840,7 +2838,6 @@ void FourierTransformer<ComputeBaseType, PositionSpaceType, OtherImageType, Rank
                                     d_ptr.buffer_1,
                                     d_ptr.buffer_2,
                                     LP.mem_offsets,
-                                    apparent_Q,
                                     workspace_fwd,
                                     workspace_inv,
                                     pre_op_functor,
@@ -2857,7 +2854,6 @@ void FourierTransformer<ComputeBaseType, PositionSpaceType, OtherImageType, Rank
                                     d_ptr.buffer_2,
                                     d_ptr.buffer_1,
                                     LP.mem_offsets,
-                                    apparent_Q,
                                     workspace_fwd,
                                     workspace_inv,
                                     pre_op_functor,
@@ -3191,6 +3187,12 @@ LaunchParams FourierTransformer<ComputeBaseType, PositionSpaceType, OtherImageTy
             // FIXME: I'm not sure what was supposed to be happending here and it needs to be reviewd.
             L.gridDims                      = dim3(1, fwd_dims_out.w, 1);
             L.mem_offsets.physical_x_input  = inv_dims_in.y;
+            L.mem_offsets.physical_x_output = inv_dims_out.y;
+        }
+        else {
+            // FIXME: I'm not sure what was supposed to be happending here and it needs to be reviewd.
+            L.gridDims                      = dim3(1, fwd_dims_out.w, 1);
+            L.mem_offsets.physical_x_input  = fwd_dims_in.y;
             L.mem_offsets.physical_x_output = inv_dims_out.y;
         }
     }
